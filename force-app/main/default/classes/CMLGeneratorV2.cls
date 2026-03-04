@@ -28,19 +28,26 @@ public with sharing class CMLGeneratorV2 {
         public String parentTypeName; // e.g., classification name, or null for no inheritance
         public Id referenceObjectId;
         public Boolean isGroup = false;
+        public Integer minInstanceQty; // for group types
+        public Integer maxInstanceQty; // for group types
         public Map<String, Object> properties; // annotation properties
         public List<CMLAttr> attributes;
         public List<CMLRel> relations;
         public List<String> constraints; // raw CML constraint lines from snippets
-        public List<String> groupReferences; // group ref names
+        public List<CMLGroupRef> groupReferences; // PCG mode group references
 
         public CMLType() {
             this.properties = new Map<String, Object>();
             this.attributes = new List<CMLAttr>();
             this.relations = new List<CMLRel>();
             this.constraints = new List<String>();
-            this.groupReferences = new List<String>();
+            this.groupReferences = new List<CMLGroupRef>();
         }
+    }
+
+    public class CMLGroupRef {
+        public String refName; // lowercase group reference name
+        public String groupTypeName; // PascalCase group type name
     }
 
     public class CMLAttr {
@@ -162,10 +169,12 @@ public with sharing class CMLGeneratorV2 {
 
     // Store global property lines collected during snippet collection
     private static List<String> globalPropertyLines = new List<String>();
+    private static Boolean usePCGMode = true;
 
     private static Map<String, List<CMLSnippet__c>> collectSnippets() {
         Map<String, List<CMLSnippet__c>> result = new Map<String, List<CMLSnippet__c>>();
         globalPropertyLines = new List<String>();
+        usePCGMode = true; // PCG mode is always on
 
         List<CMLSnippet__c> allSnippets = [
             SELECT Id, CML__c, Type__c, Object__c, Label__c,
@@ -186,6 +195,12 @@ public with sharing class CMLGeneratorV2 {
             if (s.Type__c == 'global' && String.isNotBlank(s.CML__c)) {
                 for (String line : s.CML__c.split('\n')) {
                     String trimmed = line.trim();
+                    // Detect generation mode
+                    if (trimmed.startsWith('// mode:')) {
+                        String mode = trimmed.replace('// mode:', '').trim();
+                        if ('pcg'.equalsIgnoreCase(mode)) usePCGMode = true;
+                        continue;
+                    }
                     if (String.isNotBlank(trimmed) && !seenGlobalLines.contains(trimmed)) {
                         seenGlobalLines.add(trimmed);
                         globalPropertyLines.add(trimmed);
@@ -271,7 +286,11 @@ public with sharing class CMLGeneratorV2 {
             bundlesToProcess = newChildIds; // next level
 
             // Build types from this level's data
-            buildTypesFromHierarchy(pcgs, prcs, typeMap, usedNames);
+            if (usePCGMode) {
+                buildTypesFromHierarchyPCG(pcgs, prcs, typeMap, usedNames);
+            } else {
+                buildTypesFromHierarchy(pcgs, prcs, typeMap, usedNames);
+            }
         }
 
         // Query 3: All attributes for all products involved (BULK)
@@ -284,7 +303,105 @@ public with sharing class CMLGeneratorV2 {
             ensureProduct2Type(p2Id, typeMap, usedNames);
         }
 
+        // Query 4: Classification attributes for all classification types
+        Set<Id> classificationIds = new Set<Id>();
+        for (Id key : typeMap.keySet()) {
+            CMLType t = typeMap.get(key);
+            // Classification types have parentTypeName = 'LineItem' and are referenced
+            // by product types. Detect by checking if any product inherits from this type.
+            // Simpler: just collect all BasedOnIds from products we've seen
+        }
+        // Collect classification IDs from all products
+        for (Id p2Id : allProduct2Ids) {
+            CMLType t = typeMap.get(p2Id);
+            if (t != null && t.parentTypeName != 'LineItem') {
+                // Find the classification ID in the typeMap by matching name
+                for (Id key : typeMap.keySet()) {
+                    CMLType candidate = typeMap.get(key);
+                    if (candidate.name == t.parentTypeName && key != p2Id) {
+                        classificationIds.add(key);
+                        break;
+                    }
+                }
+            }
+        }
+        if (!classificationIds.isEmpty()) {
+            bulkFetchClassificationAttributes(classificationIds, typeMap);
+        }
+
         return typeMap;
+    }
+
+    private static void buildTypesFromHierarchyPCG(
+        List<ProductComponentGroup> pcgs,
+        List<ProductRelatedComponent> prcs,
+        Map<Id, CMLType> typeMap,
+        Set<String> usedNames
+    ) {
+        // Group PRCs by PCG
+        Map<Id, List<ProductRelatedComponent>> prcsByPcg = new Map<Id, List<ProductRelatedComponent>>();
+        for (ProductRelatedComponent prc : prcs) {
+            if (!prcsByPcg.containsKey(prc.ProductComponentGroupId)) {
+                prcsByPcg.put(prc.ProductComponentGroupId, new List<ProductRelatedComponent>());
+            }
+            prcsByPcg.get(prc.ProductComponentGroupId).add(prc);
+        }
+
+        for (ProductComponentGroup pcg : pcgs) {
+            Id parentProduct2Id = pcg.ParentProductId;
+            List<ProductRelatedComponent> groupPrcs = prcsByPcg.get(pcg.Id);
+            if (groupPrcs == null || groupPrcs.isEmpty()) continue;
+
+            // Ensure parent bundle type exists
+            CMLType parentType = ensureProduct2Type(parentProduct2Id, typeMap, usedNames);
+
+            // Create group type for this PCG (append "Group" suffix per pcmGenerator convention)
+            String baseName = toPascalCase(pcg.Name);
+            if (!baseName.endsWith('Group')) {
+                baseName += 'Group';
+            }
+            String groupTypeName = ensureUniqueName(baseName, usedNames);
+            CMLType groupType = new CMLType();
+            groupType.name = groupTypeName;
+            groupType.parentTypeName = null; // Group types do NOT inherit from LineItem
+            groupType.referenceObjectId = pcg.Id;
+            groupType.isGroup = true;
+            groupType.minInstanceQty = pcg.MinBundleComponents != null ? Integer.valueOf(pcg.MinBundleComponents) : 0;
+            groupType.maxInstanceQty = pcg.MaxBundleComponents != null ? Integer.valueOf(pcg.MaxBundleComponents) : 9999;
+            typeMap.put(pcg.Id, groupType);
+
+            // Add group reference to parent type
+            CMLGroupRef gref = new CMLGroupRef();
+            gref.groupTypeName = groupTypeName;
+            gref.refName = groupTypeName.toLowerCase();
+            parentType.groupReferences.add(gref);
+
+            // Create relations from group type to each child product
+            for (ProductRelatedComponent prc : groupPrcs) {
+                if (prc.ChildProductId == null) continue;
+
+                CMLType childType = ensureProduct2Type(prc.ChildProductId, typeMap, usedNames);
+                String relName = childType.name.toLowerCase();
+
+                CMLRel rel = new CMLRel();
+                rel.name = relName;
+                rel.targetTypeName = childType.name;
+                rel.prcId = prc.Id;
+                rel.minCardinality = prc.MinQuantity != null ? prc.MinQuantity.intValue() : 0;
+                Integer maxQ = prc.MaxQuantity != null ? prc.MaxQuantity.intValue() : null;
+                if (maxQ == null) maxQ = 999;
+                rel.maxCardinality = maxQ;
+
+                if (prc.IsDefaultComponent == true) {
+                    CMLDefaultComponent dc = new CMLDefaultComponent();
+                    dc.typeName = childType.name;
+                    dc.quantity = prc.Quantity;
+                    rel.defaultComponents.add(dc);
+                }
+
+                groupType.relations.add(rel);
+            }
+        }
     }
 
     private static void buildTypesFromHierarchy(
@@ -358,7 +475,7 @@ public with sharing class CMLGeneratorV2 {
 
         // Query product name and classification
         List<Product2> products = [
-            SELECT Id, Name, BasedOnId FROM Product2 WHERE Id = :product2Id LIMIT 1
+            SELECT Id, Name, BasedOnId, BasedOn.Name FROM Product2 WHERE Id = :product2Id LIMIT 1
         ];
         if (products.isEmpty()) return null;
 
@@ -368,9 +485,40 @@ public with sharing class CMLGeneratorV2 {
         CMLType type = new CMLType();
         type.name = typeName;
         type.referenceObjectId = product2Id;
-        type.parentTypeName = 'LineItem';
+
+        // Inherit from ProductClassification if available, otherwise LineItem
+        if (p.BasedOnId != null) {
+            CMLType classType = ensureClassificationType(p.BasedOnId, p.BasedOn.Name, typeMap, usedNames);
+            type.parentTypeName = classType != null ? classType.name : 'LineItem';
+        } else {
+            type.parentTypeName = 'LineItem';
+        }
 
         typeMap.put(product2Id, type);
+        return type;
+    }
+
+    private static CMLType ensureClassificationType(Id classificationId, String classificationName, Map<Id, CMLType> typeMap, Set<String> usedNames) {
+        if (typeMap.containsKey(classificationId)) return typeMap.get(classificationId);
+
+        String typeName;
+        if (String.isNotBlank(classificationName)) {
+            typeName = ensureUniqueName(toPascalCase(classificationName), usedNames);
+        } else {
+            // Fallback: query if name not provided
+            List<ProductClassification> pcs = [
+                SELECT Id, Name FROM ProductClassification WHERE Id = :classificationId LIMIT 1
+            ];
+            if (pcs.isEmpty()) return null;
+            typeName = ensureUniqueName(toPascalCase(pcs[0].Name), usedNames);
+        }
+
+        CMLType type = new CMLType();
+        type.name = typeName;
+        type.referenceObjectId = classificationId;
+        type.parentTypeName = 'LineItem'; // Classification inherits from LineItem
+
+        typeMap.put(classificationId, type);
         return type;
     }
 
@@ -444,6 +592,72 @@ public with sharing class CMLGeneratorV2 {
         }
     }
 
+    private static void bulkFetchClassificationAttributes(Set<Id> classificationIds, Map<Id, CMLType> typeMap) {
+        List<ProductClassificationAttr> pcas = [
+            SELECT Id, ProductClassificationId,
+                   AttributeDefinition.DeveloperName,
+                   AttributeDefinition.DataType,
+                   AttributeDefinition.PicklistId,
+                   DefaultValue, IsReadOnly
+            FROM ProductClassificationAttr
+            WHERE ProductClassificationId IN :classificationIds
+            AND AttributeDefinition.IsActive = true
+            ORDER BY ProductClassificationId, AttributeDefinition.DeveloperName
+        ];
+
+        // Collect picklist IDs
+        Set<Id> picklistIds = new Set<Id>();
+        for (ProductClassificationAttr pca : pcas) {
+            if (pca.AttributeDefinition.PicklistId != null) {
+                picklistIds.add(pca.AttributeDefinition.PicklistId);
+            }
+        }
+
+        // Bulk fetch picklist values
+        Map<Id, List<String>> picklistValuesMap = new Map<Id, List<String>>();
+        if (!picklistIds.isEmpty()) {
+            List<AttributePicklistValue> apvs = [
+                SELECT Id, Name, PicklistId
+                FROM AttributePicklistValue
+                WHERE PicklistId IN :picklistIds
+                ORDER BY PicklistId, Sequence ASC
+            ];
+            for (AttributePicklistValue apv : apvs) {
+                if (!picklistValuesMap.containsKey(apv.PicklistId)) {
+                    picklistValuesMap.put(apv.PicklistId, new List<String>());
+                }
+                picklistValuesMap.get(apv.PicklistId).add(apv.Name);
+            }
+        }
+
+        // Assign attributes to classification types
+        for (ProductClassificationAttr pca : pcas) {
+            CMLType type = typeMap.get(pca.ProductClassificationId);
+            if (type == null) continue;
+
+            String dataType = pca.AttributeDefinition.DataType;
+            if (dataType == 'DATETIME') continue;
+
+            CMLAttr attr = new CMLAttr();
+            attr.name = pca.AttributeDefinition.DeveloperName;
+            attr.dataType = mapDataType(dataType);
+
+            if (pca.AttributeDefinition.PicklistId != null) {
+                List<String> vals = picklistValuesMap.get(pca.AttributeDefinition.PicklistId);
+                if (vals != null) attr.domainValues = vals;
+            }
+
+            if (String.isNotBlank(pca.DefaultValue)) {
+                attr.properties.put('defaultValue', pca.DefaultValue);
+            }
+            if (pca.IsReadOnly == true) {
+                attr.properties.put('configurable', false);
+            }
+
+            type.attributes.add(attr);
+        }
+    }
+
     private static String mapDataType(String sfDataType) {
         if (sfDataType == 'Number' || sfDataType == 'NUMBER') return 'decimal(2)';
         if (sfDataType == 'CURRENCY' || sfDataType == 'PERCENT') return 'decimal(2)';
@@ -495,11 +709,40 @@ public with sharing class CMLGeneratorV2 {
                         }
                     }
                 }
+                // Classification-level constraint snippets
+                else if (s.Object__c == 'ProductClassification' && s.Type__c == 'constraint' && s.ParentProductClassification__c != null) {
+                    CMLType classType = typeMap.get(s.ParentProductClassification__c);
+                    if (classType != null && String.isNotBlank(cmlCode)) {
+                        String translated = translateConstraintIds(cmlCode, idToNameMap);
+                        translated = translated.trim();
+                        if (!translated.endsWith(';')) translated += ';';
+                        classType.constraints.add(translated);
+                    }
+                }
+                // Classification-level annotation snippets
+                else if (s.Object__c == 'ProductClassification' && s.Type__c == 'annotation' && s.ParentProductClassification__c != null) {
+                    CMLType classType = typeMap.get(s.ParentProductClassification__c);
+                    if (classType != null) {
+                        parseAnnotationIntoProperties(s.CML__c, classType.properties);
+                    }
+                }
+                // Classification attribute-level annotation snippets
                 else if (s.Object__c == 'ProductClassificationAttr' && s.Type__c == 'annotation') {
                     Id classId = s.ParentProductClassificationAttr__r?.ProductClassificationId;
                     String attrDevName = s.ParentProductClassificationAttr__r?.AttributeDefinition?.DeveloperName;
                     if (classId != null && attrDevName != null) {
+                        // First try classification type, then fall through to all types
+                        CMLType classType = typeMap.get(classId);
+                        if (classType != null) {
+                            for (CMLAttr attr : classType.attributes) {
+                                if (attr.name == attrDevName) {
+                                    parseAnnotationIntoProperties(s.CML__c, attr.properties);
+                                }
+                            }
+                        }
+                        // Also apply to product types that inherit these attributes
                         for (CMLType type : typeMap.values()) {
+                            if (type.referenceObjectId == classId) continue; // skip classification type itself
                             for (CMLAttr attr : type.attributes) {
                                 if (attr.name == attrDevName) {
                                     parseAnnotationIntoProperties(s.CML__c, attr.properties);
@@ -605,22 +848,43 @@ public with sharing class CMLGeneratorV2 {
 
             if (hasContent) {
                 neededTypeIds.add(key);
-                // Scan constraint text for referenced type/relation names
+                // Scan constraint text for referenced type/relation/group names
                 for (String constraint : t.constraints) {
+                    // Match relation[Type] patterns
                     Pattern p = Pattern.compile('(\\w+)\\[(\\w+)\\]');
                     Matcher m = p.matcher(constraint);
                     while (m.find()) {
                         referencedNames.add(m.group(1)); // relation name
                         referencedNames.add(m.group(2)); // type name
                     }
+                    // Match dotted group reference paths: groupref.relation[Type]
+                    // e.g., "accessories.mouse[Mouse]" or "laptopgroup.laptop[Laptop].Display"
+                    Pattern dotP = Pattern.compile('(\\w+)\\.(\\w+)\\[');
+                    Matcher dotM = dotP.matcher(constraint);
+                    while (dotM.find()) {
+                        referencedNames.add(dotM.group(1)); // group reference name
+                        referencedNames.add(dotM.group(2)); // relation name inside group
+                    }
+                    // Match all identifiers to catch attribute references like .Display
+                    Pattern idP = Pattern.compile('\\b(\\w+)\\b');
+                    Matcher idM = idP.matcher(constraint);
+                    while (idM.find()) {
+                        referencedNames.add(idM.group(1));
+                    }
                 }
             }
+        }
+
+        // Build lowercase→Id lookup for group reference resolution
+        Map<String, Id> lowercaseNameToId = new Map<String, Id>();
+        for (Id key : typeMap.keySet()) {
+            lowercaseNameToId.put(typeMap.get(key).name.toLowerCase(), key);
         }
 
         // Step 2: Add types referenced by name in constraint text
         for (Id key : typeMap.keySet()) {
             CMLType t = typeMap.get(key);
-            if (referencedNames.contains(t.name)) {
+            if (referencedNames.contains(t.name) || referencedNames.contains(t.name.toLowerCase())) {
                 neededTypeIds.add(key);
             }
             for (CMLRel rel : t.relations) {
@@ -631,11 +895,32 @@ public with sharing class CMLGeneratorV2 {
                     }
                 }
             }
+            // Check group references by lowercase name (constraint text uses lowercase)
+            for (CMLGroupRef gr : t.groupReferences) {
+                if (referencedNames.contains(gr.refName) || referencedNames.contains(gr.groupTypeName)) {
+                    neededTypeIds.add(key); // parent type is needed
+                    if (nameToId.containsKey(gr.groupTypeName)) {
+                        neededTypeIds.add(nameToId.get(gr.groupTypeName)); // group type is needed
+                    }
+                }
+            }
         }
 
-        // Step 3: Transitive closure — if a type is needed, keep ALL types
-        // reachable from its relations (entire sub-hierarchy).
-        // Iterate until no new types are added.
+        // Step 2b: If a product type's parent classification is referenced, keep it
+        Set<Id> parentClassIds = new Set<Id>();
+        for (Id key : neededTypeIds) {
+            CMLType t = typeMap.get(key);
+            if (t != null && String.isNotBlank(t.parentTypeName) && t.parentTypeName != 'LineItem' && nameToId.containsKey(t.parentTypeName)
+                && (referencedNames.contains(t.parentTypeName) || referencedNames.contains(t.parentTypeName.toLowerCase()))) {
+                parentClassIds.add(nameToId.get(t.parentTypeName));
+            }
+        }
+        neededTypeIds.addAll(parentClassIds);
+
+        // Step 3: Transitive closure — follow ONLY referenced paths.
+        // Parent classification types are always followed (inheritance).
+        // Relations and group references are only followed if their name
+        // appears in constraint text (referencedNames).
         Integer prevSize = 0;
         while (neededTypeIds.size() != prevSize) {
             prevSize = neededTypeIds.size();
@@ -643,9 +928,23 @@ public with sharing class CMLGeneratorV2 {
             for (Id key : neededTypeIds) {
                 CMLType t = typeMap.get(key);
                 if (t == null) continue;
+                // Keep parent classification type ONLY if referenced in constraint text
+                if (String.isNotBlank(t.parentTypeName) && t.parentTypeName != 'LineItem' && nameToId.containsKey(t.parentTypeName)
+                    && (referencedNames.contains(t.parentTypeName) || referencedNames.contains(t.parentTypeName.toLowerCase()))) {
+                    toAdd.add(nameToId.get(t.parentTypeName));
+                }
+                // Only follow relations that are referenced in constraint text
                 for (CMLRel rel : t.relations) {
-                    if (nameToId.containsKey(rel.targetTypeName)) {
+                    if ((referencedNames.contains(rel.name) || referencedNames.contains(rel.targetTypeName))
+                        && nameToId.containsKey(rel.targetTypeName)) {
                         toAdd.add(nameToId.get(rel.targetTypeName));
+                    }
+                }
+                // Only follow group references that are referenced in constraint text
+                for (CMLGroupRef gr : t.groupReferences) {
+                    if ((referencedNames.contains(gr.refName) || referencedNames.contains(gr.groupTypeName))
+                        && nameToId.containsKey(gr.groupTypeName)) {
+                        toAdd.add(nameToId.get(gr.groupTypeName));
                     }
                 }
             }
@@ -659,19 +958,37 @@ public with sharing class CMLGeneratorV2 {
                 toRemove.add(key);
             }
         }
+        // Collect removed type names so we can fix dangling parent references
+        Set<String> removedTypeNames = new Set<String>();
         for (Id key : toRemove) {
+            removedTypeNames.add(typeMap.get(key).name);
             typeMap.remove(key);
         }
 
-        // Step 5: Prune relations that point to removed types
+        // Step 4b: If a type's parent classification was removed, fall back to LineItem
         for (CMLType t : typeMap.values()) {
-            List<CMLRel> kept = new List<CMLRel>();
+            if (String.isNotBlank(t.parentTypeName) && removedTypeNames.contains(t.parentTypeName)) {
+                t.parentTypeName = 'LineItem';
+            }
+        }
+
+        // Step 5: Prune relations and group references that point to removed types
+        for (CMLType t : typeMap.values()) {
+            List<CMLRel> keptRels = new List<CMLRel>();
             for (CMLRel rel : t.relations) {
                 if (nameToId.containsKey(rel.targetTypeName) && typeMap.containsKey(nameToId.get(rel.targetTypeName))) {
-                    kept.add(rel);
+                    keptRels.add(rel);
                 }
             }
-            t.relations = kept;
+            t.relations = keptRels;
+
+            List<CMLGroupRef> keptRefs = new List<CMLGroupRef>();
+            for (CMLGroupRef gr : t.groupReferences) {
+                if (nameToId.containsKey(gr.groupTypeName) && typeMap.containsKey(nameToId.get(gr.groupTypeName))) {
+                    keptRefs.add(gr);
+                }
+            }
+            t.groupReferences = keptRefs;
         }
 
         // Step 6: Prune attributes not referenced in any constraint text
@@ -732,8 +1049,33 @@ public with sharing class CMLGeneratorV2 {
 
         cml += '\ntype LineItem;\n\n';
 
+        // Identify classification types (types that other types inherit from)
+        Set<String> classificationTypeNames = new Set<String>();
         for (CMLType type : typeMap.values()) {
-            cml += generateTypeBlock(type);
+            if (String.isNotBlank(type.parentTypeName) && type.parentTypeName != 'LineItem') {
+                classificationTypeNames.add(type.parentTypeName);
+            }
+        }
+
+        // Output classification types first (products inherit from them)
+        for (CMLType type : typeMap.values()) {
+            if (classificationTypeNames.contains(type.name)) {
+                cml += generateTypeBlock(type);
+            }
+        }
+
+        // Then group types (PCG mode — must come before product types that reference them)
+        for (CMLType type : typeMap.values()) {
+            if (type.isGroup && !classificationTypeNames.contains(type.name)) {
+                cml += generateTypeBlock(type);
+            }
+        }
+
+        // Then product types
+        for (CMLType type : typeMap.values()) {
+            if (!classificationTypeNames.contains(type.name) && !type.isGroup) {
+                cml += generateTypeBlock(type);
+            }
         }
 
         return cml;
@@ -742,7 +1084,15 @@ public with sharing class CMLGeneratorV2 {
     private static String generateTypeBlock(CMLType type) {
         String output = '';
 
-        // Annotation
+        // Group type annotation (@(minInstanceQty = X, maxInstanceQty = Y))
+        if (type.isGroup && (type.minInstanceQty != null || type.maxInstanceQty != null)) {
+            List<String> groupAnns = new List<String>();
+            if (type.minInstanceQty != null) groupAnns.add('minInstanceQty = ' + type.minInstanceQty);
+            if (type.maxInstanceQty != null) groupAnns.add('maxInstanceQty = ' + type.maxInstanceQty);
+            output += '@(' + String.join(groupAnns, ', ') + ')\n';
+        }
+
+        // Custom properties annotation
         if (!type.properties.isEmpty()) {
             output += generateAnnotation(type.properties) + '\n';
         }
@@ -766,9 +1116,9 @@ public with sharing class CMLGeneratorV2 {
             output += generateAttributeLine(attr);
         }
 
-        // Group references
-        for (String gr : type.groupReferences) {
-            output += gr + '\n';
+        // Group references (PCG mode)
+        for (CMLGroupRef gr : type.groupReferences) {
+            output += '    ' + gr.groupTypeName + ' ' + gr.refName + ';\n';
         }
 
         // Relations
@@ -960,7 +1310,30 @@ public with sharing class CMLGeneratorV2 {
                 continue;
             }
 
-            // Type record
+            // Group types → ConstraintModelTagType = 'Group', referenceObjectId = PCG Id
+            if (type.isGroup) {
+                ExpressionSetConstraintObj groupObj = new ExpressionSetConstraintObj();
+                groupObj.ExpressionSetId = expressionSetId;
+                groupObj.ReferenceObjectId = type.referenceObjectId; // ProductComponentGroup Id
+                groupObj.ConstraintModelTag = type.name;
+                groupObj.ConstraintModelTagType = 'Group';
+                toCreate.add(groupObj);
+
+                // Port records for relations inside the group type
+                for (CMLRel rel : type.relations) {
+                    if (rel.prcId != null) {
+                        ExpressionSetConstraintObj portObj = new ExpressionSetConstraintObj();
+                        portObj.ExpressionSetId = expressionSetId;
+                        portObj.ReferenceObjectId = rel.prcId;
+                        portObj.ConstraintModelTag = rel.name;
+                        portObj.ConstraintModelTagType = 'Port';
+                        toCreate.add(portObj);
+                    }
+                }
+                continue;
+            }
+
+            // Product/classification types → ConstraintModelTagType = 'Type'
             ExpressionSetConstraintObj typeObj = new ExpressionSetConstraintObj();
             typeObj.ExpressionSetId = expressionSetId;
             typeObj.ReferenceObjectId = type.referenceObjectId;

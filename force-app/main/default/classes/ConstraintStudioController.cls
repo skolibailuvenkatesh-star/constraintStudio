@@ -242,6 +242,233 @@ public with sharing class ConstraintStudioController {
     }
 
     @AuraEnabled(cacheable=true)
+    public static Map<String, Object> getProductContext(String recordId, String objectApiName) {
+        try {
+            List<Map<String, Object>> productAttributes = new List<Map<String, Object>>();
+            List<Map<String, Object>> classificationAttributes = new List<Map<String, Object>>();
+            List<Map<String, Object>> bundleTree = new List<Map<String, Object>>();
+            String classificationName = '';
+
+            if (objectApiName == 'Product2') {
+                Product2 product = [SELECT Id, Name, BasedOnId, BasedOn.Name FROM Product2 WHERE Id = :recordId LIMIT 1];
+
+                // Product-level attributes with domain
+                productAttributes = fetchAttributesForProduct(recordId);
+
+                // Classification attributes with domain
+                if (product.BasedOnId != null) {
+                    classificationName = product.BasedOn.Name;
+                    classificationAttributes = fetchAttributesForClassification(product.BasedOnId);
+                }
+
+                // Recursive bundle hierarchy (flat tree with depth)
+                buildBundleTree(recordId, 0, bundleTree, new Set<Id>());
+
+            } else if (objectApiName == 'ProductClassification') {
+                classificationName = [SELECT Name FROM ProductClassification WHERE Id = :recordId LIMIT 1].Name;
+                classificationAttributes = fetchAttributesForClassification(Id.valueOf(recordId));
+            }
+
+            return new Map<String, Object>{
+                'productAttributes' => productAttributes,
+                'classificationAttributes' => classificationAttributes,
+                'classificationName' => classificationName,
+                'bundleTree' => bundleTree
+            };
+        } catch (Exception e) {
+            throw new AuraHandledException('Error fetching product context: ' + e.getMessage());
+        }
+    }
+
+    private static List<Map<String, Object>> fetchAttributesForProduct(Id product2Id) {
+        List<Map<String, Object>> result = new List<Map<String, Object>>();
+        List<ProductAttributeDefinition> pads = [
+            SELECT AttributeDefinition.DeveloperName, AttributeDefinition.DataType,
+                   AttributeDefinition.PicklistId
+            FROM ProductAttributeDefinition
+            WHERE Product2Id = :product2Id
+            AND AttributeDefinition.IsActive = true
+            ORDER BY AttributeDefinition.DeveloperName
+        ];
+
+        Set<Id> picklistIds = new Set<Id>();
+        for (ProductAttributeDefinition pad : pads) {
+            if (pad.AttributeDefinition.PicklistId != null) picklistIds.add(pad.AttributeDefinition.PicklistId);
+        }
+        Map<Id, List<String>> picklistMap = bulkFetchPicklistValues(picklistIds);
+
+        for (ProductAttributeDefinition pad : pads) {
+            Map<String, Object> attr = new Map<String, Object>{
+                'name' => pad.AttributeDefinition.DeveloperName,
+                'dataType' => pad.AttributeDefinition.DataType
+            };
+            if (pad.AttributeDefinition.PicklistId != null && picklistMap.containsKey(pad.AttributeDefinition.PicklistId)) {
+                attr.put('domain', picklistMap.get(pad.AttributeDefinition.PicklistId));
+            }
+            result.add(attr);
+        }
+        return result;
+    }
+
+    private static List<Map<String, Object>> fetchAttributesForClassification(Id classificationId) {
+        List<Map<String, Object>> result = new List<Map<String, Object>>();
+        List<ProductClassificationAttr> pcas = [
+            SELECT AttributeDefinition.DeveloperName, AttributeDefinition.DataType,
+                   AttributeDefinition.PicklistId
+            FROM ProductClassificationAttr
+            WHERE ProductClassificationId = :classificationId
+            AND AttributeDefinition.IsActive = true
+            ORDER BY AttributeDefinition.DeveloperName
+        ];
+
+        Set<Id> picklistIds = new Set<Id>();
+        for (ProductClassificationAttr pca : pcas) {
+            if (pca.AttributeDefinition.PicklistId != null) picklistIds.add(pca.AttributeDefinition.PicklistId);
+        }
+        Map<Id, List<String>> picklistMap = bulkFetchPicklistValues(picklistIds);
+
+        for (ProductClassificationAttr pca : pcas) {
+            Map<String, Object> attr = new Map<String, Object>{
+                'name' => pca.AttributeDefinition.DeveloperName,
+                'dataType' => pca.AttributeDefinition.DataType
+            };
+            if (pca.AttributeDefinition.PicklistId != null && picklistMap.containsKey(pca.AttributeDefinition.PicklistId)) {
+                attr.put('domain', picklistMap.get(pca.AttributeDefinition.PicklistId));
+            }
+            result.add(attr);
+        }
+        return result;
+    }
+
+    private static Map<Id, List<String>> bulkFetchPicklistValues(Set<Id> picklistIds) {
+        Map<Id, List<String>> result = new Map<Id, List<String>>();
+        if (picklistIds.isEmpty()) return result;
+        for (AttributePicklistValue apv : [
+            SELECT Name, PicklistId FROM AttributePicklistValue
+            WHERE PicklistId IN :picklistIds ORDER BY PicklistId, Sequence ASC
+        ]) {
+            if (!result.containsKey(apv.PicklistId)) result.put(apv.PicklistId, new List<String>());
+            result.get(apv.PicklistId).add(apv.Name);
+        }
+        return result;
+    }
+
+    private static void buildBundleTree(Id parentProductId, Integer depth, List<Map<String, Object>> tree, Set<Id> visited) {
+        if (visited.contains(parentProductId) || depth > 4) return; // prevent infinite loops
+        visited.add(parentProductId);
+
+        List<ProductComponentGroup> pcgs = [
+            SELECT Id, Name, MaxBundleComponents
+            FROM ProductComponentGroup
+            WHERE ParentProductId = :parentProductId
+            ORDER BY Name
+        ];
+
+        Set<Id> pcgIds = new Set<Id>();
+        for (ProductComponentGroup pcg : pcgs) pcgIds.add(pcg.Id);
+        if (pcgIds.isEmpty()) return;
+
+        List<ProductRelatedComponent> prcs = [
+            SELECT Id, ProductComponentGroupId, ChildProductId, ChildProduct.Name, ChildProduct.BasedOnId
+            FROM ProductRelatedComponent
+            WHERE ProductComponentGroupId IN :pcgIds
+            ORDER BY ChildProduct.Name
+        ];
+
+        // Collect all child product IDs to bulk-fetch attributes
+        Set<Id> childProductIds = new Set<Id>();
+        for (ProductRelatedComponent prc : prcs) {
+            if (prc.ChildProductId != null) childProductIds.add(prc.ChildProductId);
+        }
+
+        // Bulk fetch attributes for all child products
+        Map<Id, List<Map<String, Object>>> childAttrMap = new Map<Id, List<Map<String, Object>>>();
+        if (!childProductIds.isEmpty()) {
+            List<ProductAttributeDefinition> pads = [
+                SELECT Product2Id, AttributeDefinition.DeveloperName,
+                       AttributeDefinition.DataType, AttributeDefinition.PicklistId
+                FROM ProductAttributeDefinition
+                WHERE Product2Id IN :childProductIds
+                AND AttributeDefinition.IsActive = true
+                ORDER BY Product2Id, AttributeDefinition.DeveloperName
+            ];
+
+            Set<Id> picklistIds = new Set<Id>();
+            for (ProductAttributeDefinition pad : pads) {
+                if (pad.AttributeDefinition.PicklistId != null) picklistIds.add(pad.AttributeDefinition.PicklistId);
+            }
+            Map<Id, List<String>> picklistMap = bulkFetchPicklistValues(picklistIds);
+
+            for (ProductAttributeDefinition pad : pads) {
+                if (!childAttrMap.containsKey(pad.Product2Id)) {
+                    childAttrMap.put(pad.Product2Id, new List<Map<String, Object>>());
+                }
+                Map<String, Object> attr = new Map<String, Object>{
+                    'name' => pad.AttributeDefinition.DeveloperName,
+                    'dataType' => pad.AttributeDefinition.DataType
+                };
+                if (pad.AttributeDefinition.PicklistId != null && picklistMap.containsKey(pad.AttributeDefinition.PicklistId)) {
+                    attr.put('domain', picklistMap.get(pad.AttributeDefinition.PicklistId));
+                }
+                childAttrMap.get(pad.Product2Id).add(attr);
+            }
+        }
+
+        // Check which children are bundles (have their own PCGs)
+        Set<Id> bundleChildIds = new Set<Id>();
+        if (!childProductIds.isEmpty()) {
+            for (ProductComponentGroup childPcg : [
+                SELECT ParentProductId FROM ProductComponentGroup WHERE ParentProductId IN :childProductIds
+            ]) {
+                bundleChildIds.add(childPcg.ParentProductId);
+            }
+        }
+
+        // Group PRCs by PCG
+        Map<Id, List<ProductRelatedComponent>> prcsByPcg = new Map<Id, List<ProductRelatedComponent>>();
+        for (ProductRelatedComponent prc : prcs) {
+            if (!prcsByPcg.containsKey(prc.ProductComponentGroupId)) {
+                prcsByPcg.put(prc.ProductComponentGroupId, new List<ProductRelatedComponent>());
+            }
+            prcsByPcg.get(prc.ProductComponentGroupId).add(prc);
+        }
+
+        // Build flat tree
+        for (ProductComponentGroup pcg : pcgs) {
+            // Add group node
+            tree.add(new Map<String, Object>{
+                'id' => pcg.Id,
+                'depth' => depth,
+                'nodeType' => 'group',
+                'name' => pcg.Name,
+                'maxQty' => pcg.MaxBundleComponents != null ? String.valueOf(pcg.MaxBundleComponents) : '999'
+            });
+
+            List<ProductRelatedComponent> groupPrcs = prcsByPcg.get(pcg.Id);
+            if (groupPrcs == null) continue;
+
+            for (ProductRelatedComponent prc : groupPrcs) {
+                Boolean isBundle = bundleChildIds.contains(prc.ChildProductId);
+                List<Map<String, Object>> attrs = childAttrMap.containsKey(prc.ChildProductId)
+                    ? childAttrMap.get(prc.ChildProductId) : new List<Map<String, Object>>();
+
+                tree.add(new Map<String, Object>{
+                    'id' => prc.ChildProductId,
+                    'depth' => depth + 1,
+                    'nodeType' => isBundle ? 'bundle' : 'product',
+                    'name' => prc.ChildProduct.Name,
+                    'attributes' => attrs
+                });
+
+                // Recurse into child bundles
+                if (isBundle) {
+                    buildBundleTree(prc.ChildProductId, depth + 2, tree, visited);
+                }
+            }
+        }
+    }
+
+    @AuraEnabled(cacheable=true)
     public static List<Map<String, String>> getAttributeDefinitions(String recordId, String objectApiName) {
         try {
             Set<String> attributeNames = new Set<String>();

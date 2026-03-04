@@ -29,6 +29,21 @@
                             class="global-save-button">
                         </lightning-button-icon>
                     </div>
+                    <div class="mode-toggle-container">
+                        <span class="mode-toggle-label">Flat</span>
+                        <lightning-input
+                            type="toggle"
+                            label="CML Mode"
+                            variant="label-hidden"
+                            checked={isPCGMode}
+                            onchange={handleModeToggle}
+                            class="mode-toggle-input"
+                            message-toggle-active=""
+                            message-toggle-inactive=""
+                            disabled>
+                        </lightning-input>
+                        <span class="mode-toggle-label pcg-active">PCG</span>
+                    </div>
                     <lightning-textarea
                         label="Global Properties"
                         variant="label-hidden"
@@ -349,6 +364,113 @@
                             </lightning-icon>
                             <p class="placeholder-text">Select a snippet to edit or create a new one</p>
                         </div>
+                    </div>
+                </template>
+
+                <!-- Available Context Panel -->
+                <template if:true={hasProductContext}>
+                    <div class="context-panel">
+                        <div class="context-header" onclick={handleContextToggle}>
+                            <lightning-icon
+                                icon-name={contextToggleIcon}
+                                size="x-small"
+                                class="context-toggle-icon">
+                            </lightning-icon>
+                            <span class="context-title">Available Context</span>
+                        </div>
+                        <template if:true={contextExpanded}>
+                            <div class="context-body">
+                                <!-- Classification Attributes (inherited) -->
+                                <template if:true={hasClassificationAttributes}>
+                                    <div class="context-section">
+                                        <div class="context-section-header">
+                                            <span class="context-section-label">Classification: {productContext.classificationName}</span>
+                                        </div>
+                                        <div class="context-items">
+                                            <template for:each={formattedClassificationAttributes} for:item="attr">
+                                                <div key={attr.name} class="context-attr-row">
+                                                    <div class="context-item">
+                                                        <span class="context-item-type">{attr.dataType}</span>
+                                                        <span class="context-item-name">{attr.name}</span>
+                                                        <span class="context-item-badge inherited">Inherited</span>
+                                                    </div>
+                                                    <template if:true={attr.hasDomain}>
+                                                        <div class="context-domain">= [{attr.domainStr}]</div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Product Attributes -->
+                                <template if:true={hasProductAttributes}>
+                                    <div class="context-section">
+                                        <div class="context-section-header">
+                                            <span class="context-section-label">Product Attributes</span>
+                                        </div>
+                                        <div class="context-items">
+                                            <template for:each={formattedProductAttributes} for:item="attr">
+                                                <div key={attr.name} class="context-attr-row">
+                                                    <div class="context-item">
+                                                        <span class="context-item-type">{attr.dataType}</span>
+                                                        <span class="context-item-name">{attr.name}</span>
+                                                    </div>
+                                                    <template if:true={attr.hasDomain}>
+                                                        <div class="context-domain">= [{attr.domainStr}]</div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Bundle Hierarchy -->
+                                <template if:true={hasBundleTree}>
+                                    <div class="context-section">
+                                        <div class="context-section-header">
+                                            <span class="context-section-label">Bundle Hierarchy</span>
+                                        </div>
+                                        <div class="context-items">
+                                            <template for:each={formattedBundleTree} for:item="node">
+                                                <div key={node.id}>
+                                                    <!-- Group node -->
+                                                    <template if:true={node.isGroup}>
+                                                        <div class="context-item context-group" style={node.indentStyle}>
+                                                            <span class="context-item-name context-group-name">{node.name}</span>
+                                                            <span class="context-item-badge relation">[0..{node.maxQty}]</span>
+                                                        </div>
+                                                    </template>
+                                                    <!-- Product / Bundle node -->
+                                                    <template if:false={node.isGroup}>
+                                                        <div class="context-item" style={node.indentStyle}>
+                                                            <span class="context-item-name">{node.name}</span>
+                                                            <template if:true={node.isBundle}>
+                                                                <span class="context-item-badge bundle">Bundle</span>
+                                                            </template>
+                                                        </div>
+                                                        <!-- Child product attributes -->
+                                                        <template if:true={node.hasAttributes}>
+                                                            <template for:each={node.formattedAttributes} for:item="attr">
+                                                                <div key={attr.name} class="context-attr-row" style={node.indentStyle}>
+                                                                    <div class="context-item context-child-attr">
+                                                                        <span class="context-item-type">{attr.dataType}</span>
+                                                                        <span class="context-item-name">{attr.name}</span>
+                                                                    </div>
+                                                                    <template if:true={attr.hasDomain}>
+                                                                        <div class="context-domain" style={node.indentStyle}>= [{attr.domainStr}]</div>
+                                                                    </template>
+                                                                </div>
+                                                            </template>
+                                                        </template>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
                     </div>
                 </template>
             </div>

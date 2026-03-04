@@ -11,6 +11,7 @@ import getContextualProducts from '@salesforce/apex/ConstraintStudioController.g
 import getPicklistValues from '@salesforce/apex/ConstraintStudioController.getPicklistValues';
 import findProductRelatedComponent from '@salesforce/apex/ConstraintStudioController.findProductRelatedComponent';
 import getGlobalSnippet from '@salesforce/apex/ConstraintStudioController.getGlobalSnippet';
+import getProductContext from '@salesforce/apex/ConstraintStudioController.getProductContext';
 
 
 export default class ConstraintStudio extends LightningElement {
@@ -39,6 +40,9 @@ export default class ConstraintStudio extends LightningElement {
     @track idMappings = {}; // Store display name -> ID mappings
     @track annotations = []; // Store annotations
     @track globalProperties = ''; // Global properties (extern, property declarations)
+    @track isPCGMode = true; // PCG mode is always on
+    @track productContext = null; // Available attributes, relations, classification info
+    @track contextExpanded = false; // Toggle for context panel
 
     wiredSnippetsResult;
     allSuggestions = []; // Store all suggestions for reverse lookup
@@ -193,6 +197,7 @@ export default class ConstraintStudio extends LightningElement {
     connectedCallback() {
         this.loadSnippets();
         this.loadGlobalSnippet();
+        this.loadProductContext();
     }
 
     async loadGlobalSnippet() {
@@ -203,11 +208,92 @@ export default class ConstraintStudio extends LightningElement {
             });
             if (snippet) {
                 this.globalSnippetId = snippet.Id;
-                this.globalProperties = snippet.CML__c || '';
+                const raw = snippet.CML__c || '';
+                // Strip mode directive from display (mode is always PCG now)
+                const lines = raw.split('\n');
+                const filtered = [];
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('// mode:')) {
+                        continue; // skip mode directive line
+                    }
+                    filtered.push(line);
+                }
+                this.globalProperties = filtered.join('\n');
             }
         } catch (error) {
             console.error('Error loading global snippet:', error);
         }
+    }
+
+    async loadProductContext() {
+        try {
+            this.productContext = await getProductContext({
+                recordId: this.recordId,
+                objectApiName: this.objectApiName
+            });
+        } catch (error) {
+            console.error('Error loading product context:', error);
+        }
+    }
+
+    get hasProductContext() {
+        return this.productContext != null;
+    }
+
+    get hasProductAttributes() {
+        return this.productContext?.productAttributes?.length > 0;
+    }
+
+    get hasClassificationAttributes() {
+        return this.productContext?.classificationAttributes?.length > 0;
+    }
+
+    get hasBundleTree() {
+        return this.productContext?.bundleTree?.length > 0;
+    }
+
+    get formattedBundleTree() {
+        if (!this.productContext?.bundleTree) return [];
+        return this.productContext.bundleTree.map(node => ({
+            ...node,
+            isGroup: node.nodeType === 'group',
+            isBundle: node.nodeType === 'bundle',
+            isProduct: node.nodeType === 'product',
+            indentStyle: `padding-left: ${(node.depth * 16) + 16}px`,
+            hasAttributes: node.attributes && node.attributes.length > 0,
+            formattedAttributes: (node.attributes || []).map(a => ({
+                ...a,
+                hasDomain: a.domain && a.domain.length > 0,
+                domainStr: a.domain ? a.domain.join(', ') : ''
+            }))
+        }));
+    }
+
+    get formattedProductAttributes() {
+        if (!this.productContext?.productAttributes) return [];
+        return this.productContext.productAttributes.map(a => ({
+            ...a,
+            hasDomain: a.domain && a.domain.length > 0,
+            domainStr: a.domain ? a.domain.join(', ') : ''
+        }));
+    }
+
+    get formattedClassificationAttributes() {
+        if (!this.productContext?.classificationAttributes) return [];
+        return this.productContext.classificationAttributes.map(a => ({
+            ...a,
+            hasDomain: a.domain && a.domain.length > 0,
+            domainStr: a.domain ? a.domain.join(', ') : ''
+        }));
+    }
+
+    get contextToggleIcon() {
+        return this.contextExpanded ? 'utility:chevrondown' : 'utility:chevronright';
+    }
+
+    handleContextToggle() {
+        this.contextExpanded = !this.contextExpanded;
     }
     
     async loadSnippets() {
@@ -474,13 +560,24 @@ export default class ConstraintStudio extends LightningElement {
         this.globalProperties = event.target.value;
     }
 
+    handleModeToggle(event) {
+        this.isPCGMode = event.target.checked;
+    }
+
+    buildGlobalCmlForSave() {
+        // Always PCG mode — prepend mode directive
+        const props = this.globalProperties ? this.globalProperties.trim() : '';
+        return props ? '// mode:pcg\n' + props : '// mode:pcg';
+    }
+
     async handleGlobalPropertiesSave() {
         try {
+            const cmlToSave = this.buildGlobalCmlForSave();
             if (this.globalSnippetId) {
                 await saveCMLSnippet({
                     snippetId: this.globalSnippetId,
                     label: '__GLOBAL__',
-                    cml: this.globalProperties
+                    cml: cmlToSave
                 });
             } else {
                 const newSnippet = await createCMLSnippet({
@@ -493,7 +590,7 @@ export default class ConstraintStudio extends LightningElement {
                 await saveCMLSnippet({
                     snippetId: this.globalSnippetId,
                     label: '__GLOBAL__',
-                    cml: this.globalProperties
+                    cml: cmlToSave
                 });
             }
             this.showToast('Success', 'Global properties saved', 'success');

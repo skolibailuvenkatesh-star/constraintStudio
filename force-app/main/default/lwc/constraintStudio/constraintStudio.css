@@ -54,6 +54,29 @@
     letter-spacing: 0.5px;
 }
 
+.mode-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.mode-toggle-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #b0adab;
+}
+
+.mode-toggle-label.pcg-active {
+    color: #0176d3;
+    font-weight: 700;
+}
+
+.mode-toggle-input {
+    margin: 0;
+    flex-shrink: 0;
+}
+
 .global-properties-input {
     width: 100%;
     --slds-c-textarea-sizing-min-height: 60px;
@@ -470,4 +493,132 @@
     background-color: #ffffff;
     border: 1px solid #dddbda;
     border-radius: 4px;
+}
+
+/* Available Context Panel */
+.context-panel {
+    border-top: 1px solid #dddbda;
+    background-color: #fafaf9;
+}
+
+.context-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    cursor: pointer;
+    user-select: none;
+    background-color: #f3f2f2;
+    border-bottom: 1px solid #dddbda;
+}
+
+.context-header:hover {
+    background-color: #e5e5e5;
+}
+
+.context-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #3e3e3c;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.context-body {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.context-section {
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.context-section-header {
+    padding: 8px 16px;
+    background-color: #f3f2f2;
+}
+
+.context-section-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #080707;
+}
+
+.context-items {
+    padding: 4px 0;
+}
+
+.context-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 16px;
+    font-size: 0.8rem;
+}
+
+.context-item:hover {
+    background-color: #f3f2f2;
+}
+
+.context-item-type {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.7rem;
+    color: #706e6b;
+    min-width: 60px;
+    text-transform: lowercase;
+}
+
+.context-item-name {
+    font-family: 'Courier New', Courier, monospace;
+    color: #080707;
+    flex: 1;
+}
+
+.context-item-badge {
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.context-item-badge.inherited {
+    background-color: #e8daff;
+    color: #5a1ba9;
+}
+
+.context-item-badge.relation {
+    background-color: #d4f0ff;
+    color: #0176d3;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.context-item-badge.bundle {
+    background-color: #fde8d0;
+    color: #b95d08;
+}
+
+.context-attr-row {
+    padding: 0;
+}
+
+.context-domain {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.7rem;
+    color: #706e6b;
+    padding: 0 16px 4px 92px;
+    word-break: break-word;
+}
+
+.context-group {
+    background-color: #f3f2f2;
+    border-top: 1px solid #e5e5e5;
+}
+
+.context-group-name {
+    font-weight: 600;
+}
+
+.context-child-attr {
+    opacity: 0.75;
+    font-size: 0.75rem;
 }
