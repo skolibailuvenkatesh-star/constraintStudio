@@ -622,3 +622,119 @@
     opacity: 0.75;
     font-size: 0.75rem;
 }
+
+/* ==================== Tab Bar ==================== */
+.tab-bar {
+    display: flex;
+    border-bottom: 2px solid #dddbda;
+    background-color: #ffffff;
+}
+
+.tab-button {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #706e6b;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-button:hover {
+    color: #3e3e3c;
+    background-color: #f3f2f2;
+}
+
+.tab-button.active {
+    color: #0176d3;
+    border-bottom-color: #0176d3;
+}
+
+/* ==================== Attribute Badges ==================== */
+.attr-badge {
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    margin-left: 6px;
+    flex-shrink: 0;
+}
+
+.attr-badge.sys {
+    background-color: #e1f5fe;
+    color: #0176d3;
+}
+
+.attr-badge.cls {
+    background-color: #e8daff;
+    color: #5a1ba9;
+}
+
+.attr-badge.var {
+    background-color: #d4edda;
+    color: #1b5e20;
+}
+
+/* ==================== Variable badge in Available Context ==================== */
+.context-item-badge.variable {
+    background-color: #d4edda;
+    color: #1b5e20;
+}
+
+/* ==================== Attribute Details Editor ==================== */
+.attr-details {
+    padding: 16px;
+    border-bottom: 1px solid #dddbda;
+    background-color: #ffffff;
+}
+
+.attr-detail-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.attr-detail-row:last-child {
+    margin-bottom: 0;
+}
+
+.attr-detail-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #3e3e3c;
+    min-width: 100px;
+    flex-shrink: 0;
+}
+
+.attr-detail-value {
+    flex: 1;
+}
+
+.attr-detail-value-text {
+    font-size: 0.875rem;
+    color: #080707;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.attr-domain-text {
+    font-size: 0.8rem;
+    color: #706e6b;
+    word-break: break-word;
+}
+
+.attr-name-readonly {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.attr-name-text {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #080707;
+    font-family: 'Courier New', Courier, monospace;
+}

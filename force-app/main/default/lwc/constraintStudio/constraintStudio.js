@@ -12,12 +12,19 @@ import getPicklistValues from '@salesforce/apex/ConstraintStudioController.getPi
 import findProductRelatedComponent from '@salesforce/apex/ConstraintStudioController.findProductRelatedComponent';
 import getGlobalSnippet from '@salesforce/apex/ConstraintStudioController.getGlobalSnippet';
 import getProductContext from '@salesforce/apex/ConstraintStudioController.getProductContext';
+// F-01 imports
+import saveVariableSnippet from '@salesforce/apex/ConstraintStudioController.saveVariableSnippet';
+import saveAnnotationSnippet from '@salesforce/apex/ConstraintStudioController.saveAnnotationSnippet';
 
 
 export default class ConstraintStudio extends LightningElement {
     @api recordId;
     @api objectApiName;
-    
+
+    // ==================== TAB STATE ====================
+    @track activeTab = 'snippets';
+
+    // ==================== SNIPPETS TAB STATE ====================
     @track searchTerm = '';
     @track snippets = [];
     @track groupedSnippets = {
@@ -27,7 +34,7 @@ export default class ConstraintStudio extends LightningElement {
         setdefault: { label: 'SetDefault', items: [], expanded: true, keyword: 'setdefault' },
         rule: { label: 'Rule', items: [], expanded: true, keyword: 'rule' }
     };
-    
+
     @track selectedSnippet = null;
     @track editLabel = '';
     @track editCML = '';
@@ -37,19 +44,55 @@ export default class ConstraintStudio extends LightningElement {
 
     @track attributeDefinitions = [];
     @track productComponentSuggestions = [];
-    @track idMappings = {}; // Store display name -> ID mappings
-    @track annotations = []; // Store annotations
-    @track globalProperties = ''; // Global properties (extern, property declarations)
-    @track isPCGMode = true; // PCG mode is always on
-    @track productContext = null; // Available attributes, relations, classification info
-    @track contextExpanded = false; // Toggle for context panel
+    @track idMappings = {};
+    @track annotations = [];
+    @track globalProperties = '';
+    @track isPCGMode = true;
+    @track productContext = null;
+    @track contextExpanded = false;
 
     wiredSnippetsResult;
-    allSuggestions = []; // Store all suggestions for reverse lookup
-    annotationCounter = 0; // Counter for unique annotation IDs
-    globalSnippetId = null; // Track the global properties snippet record
-    
-    
+    allSuggestions = [];
+    annotationCounter = 0;
+    globalSnippetId = null;
+
+    // ==================== F-01: ATTRIBUTES TAB STATE ====================
+    @track attrSearchTerm = '';
+    @track selectedAttrItem = null;
+    @track attrAnnotations = [];
+    @track editAttrName = '';
+    @track editAttrType = 'string';
+    @track editAttrDomain = '';
+    @track editAttrDefaultValue = '';
+    @track isSavingAttr = false;
+    attrAnnotationCounter = 0;
+    attrSectionExpandedMap = {};
+
+    // ==================== TAB GETTERS ====================
+
+    get isSnippetsTab() { return this.activeTab === 'snippets'; }
+    get isAttributesTab() { return this.activeTab === 'attributes'; }
+    get snippetsTabClass() { return 'tab-button' + (this.isSnippetsTab ? ' active' : ''); }
+    get attributesTabClass() { return 'tab-button' + (this.isAttributesTab ? ' active' : ''); }
+
+    handleTabChange(event) {
+        this.activeTab = event.currentTarget.dataset.tab;
+    }
+
+    // ==================== DATA TYPE OPTIONS ====================
+
+    get dataTypeOptions() {
+        return [
+            { label: 'string', value: 'string' },
+            { label: 'decimal(2)', value: 'decimal(2)' },
+            { label: 'boolean', value: 'boolean' },
+            { label: 'date', value: 'date' },
+            { label: 'integer', value: 'integer' }
+        ];
+    }
+
+    // ==================== WIRE HANDLERS ====================
+
     @wire(getAttributeDefinitions, {
         recordId: '$recordId',
         objectApiName: '$objectApiName'
@@ -61,7 +104,7 @@ export default class ConstraintStudio extends LightningElement {
             console.error('Error loading attribute definitions:', result.error);
         }
     }
-    
+
     @wire(getProductComponentSuggestions, {
         recordId: '$recordId'
     })
@@ -74,77 +117,62 @@ export default class ConstraintStudio extends LightningElement {
             }
         }
     }
-    
+
     updateCombinedSuggestions(source, data) {
         if (source === 'attributes') {
             this.attributeDefinitions = [...data];
         } else if (source === 'products') {
             this.productComponentSuggestions = [...data];
         }
-        
-        // Combine both sources
+
         const combined = [
             ...this.attributeDefinitions,
             ...this.productComponentSuggestions
         ];
-        
-        // Store all suggestions for reverse lookup
+
         this.allSuggestions = combined;
-        
-        // Pass combined list to code editor
         this.attributeDefinitions = combined;
     }
-    
-    // Translate display names to IDs before saving
+
+    // ==================== TRANSLATION HELPERS ====================
+
     async translateToIds(cmlText) {
         if (!cmlText) return cmlText;
-        
+
         let translated = cmlText;
-        
-        // First, handle GroupName[ProductName] patterns
-        // Pattern: word[word] where both are product/group names
+
         const bracketPattern = /([\w]+)\[([\w]+)\]/g;
         const matches = [...cmlText.matchAll(bracketPattern)];
-        
+
         for (const match of matches) {
             const groupName = match[1];
             const productName = match[2];
             const fullPattern = match[0];
-            
-            // Find the group suggestion
-            const groupSuggestion = this.allSuggestions.find(s => 
+
+            const groupSuggestion = this.allSuggestions.find(s =>
                 s.actualName === groupName && s.type === 'ProductComponentGroup'
             );
-            
-            // Find the product suggestion
-            const productSuggestion = this.allSuggestions.find(s => 
+            const productSuggestion = this.allSuggestions.find(s =>
                 s.actualName === productName && s.value && s.value.startsWith('Product2_')
             );
-            
+
             if (groupSuggestion && productSuggestion) {
-                // Extract IDs
                 const groupId = groupSuggestion.recordId;
                 const productId = productSuggestion.value.replace('Product2_', '');
-                
+
                 try {
-                    // Call Apex to find ProductRelatedComponent
                     const result = await findProductRelatedComponent({
                         productComponentGroupId: groupId,
                         product2Id: productId
                     });
-                    
+
                     if (result) {
                         let replacement;
-                        
-                        // Check if we should use ProductComponentGroup or ProductRelatedComponent
                         if (result.useProductComponentGroup === 'true') {
-                            // MaxBundleComponents==1 AND all products have same BasedOnId
                             replacement = `REL_ProductComponentGroup_${result.groupId}[Product2_${productId}]`;
                         } else {
-                            // All other cases
                             replacement = `REL_ProductRelatedComponent_${result.prcId}[Product2_${productId}]`;
                         }
-                        
                         translated = translated.replace(fullPattern, replacement);
                     }
                 } catch (error) {
@@ -152,48 +180,44 @@ export default class ConstraintStudio extends LightningElement {
                 }
             }
         }
-        
-        // Then handle remaining individual translations (attributes, etc.)
+
         this.allSuggestions.forEach(suggestion => {
             if (suggestion.actualName && suggestion.value) {
-                // Skip ProductComponentGroup and Product2_ as they're handled above
                 if (suggestion.type === 'Attribute') {
                     const regex = new RegExp('\\b' + this.escapeRegex(suggestion.actualName) + '\\b', 'g');
                     translated = translated.replace(regex, suggestion.value);
                 }
             }
         });
-        
+
         return translated;
     }
-    
-    // Translate IDs to display names when loading
+
     translateToDisplayNames(cmlText) {
         if (!cmlText) return cmlText;
-        
+
         let translated = cmlText;
-        
-        // Find all ID patterns and replace with display names
+
         this.allSuggestions.forEach(suggestion => {
             if (suggestion.value && suggestion.actualName) {
-                // Handle all product types: ProductComponentGroup, Product, and Product2_ formats
-                if (suggestion.type === 'ProductComponentGroup' || 
-                    suggestion.type === 'Product' || 
+                if (suggestion.type === 'ProductComponentGroup' ||
+                    suggestion.type === 'Product' ||
                     suggestion.value.startsWith('Product2_')) {
-                    // Replace value (ID format) with actualName
                     const regex = new RegExp('\\b' + this.escapeRegex(suggestion.value) + '\\b', 'g');
                     translated = translated.replace(regex, suggestion.actualName);
                 }
             }
         });
-        
+
         return translated;
     }
-    
+
     escapeRegex(str) {
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
-    
+
+    // ==================== LIFECYCLE ====================
+
     connectedCallback() {
         this.loadSnippets();
         this.loadGlobalSnippet();
@@ -209,14 +233,11 @@ export default class ConstraintStudio extends LightningElement {
             if (snippet) {
                 this.globalSnippetId = snippet.Id;
                 const raw = snippet.CML__c || '';
-                // Strip mode directive from display (mode is always PCG now)
                 const lines = raw.split('\n');
                 const filtered = [];
                 for (const line of lines) {
                     const trimmed = line.trim();
-                    if (trimmed.startsWith('// mode:')) {
-                        continue; // skip mode directive line
-                    }
+                    if (trimmed.startsWith('// mode:')) continue;
                     filtered.push(line);
                 }
                 this.globalProperties = filtered.join('\n');
@@ -236,6 +257,8 @@ export default class ConstraintStudio extends LightningElement {
             console.error('Error loading product context:', error);
         }
     }
+
+    // ==================== PRODUCT CONTEXT GETTERS ====================
 
     get hasProductContext() {
         return this.productContext != null;
@@ -266,6 +289,11 @@ export default class ConstraintStudio extends LightningElement {
                 ...a,
                 hasDomain: a.domain && a.domain.length > 0,
                 domainStr: a.domain ? a.domain.join(', ') : ''
+            })),
+            hasVariables: node.variables && node.variables.length > 0,
+            formattedVariables: (node.variables || []).map(v => ({
+                ...v,
+                dataType: this.parseVariableCml(v.cml).dataType
             }))
         }));
     }
@@ -288,6 +316,19 @@ export default class ConstraintStudio extends LightningElement {
         }));
     }
 
+    // F-01: Variables in Available Context
+    get hasContextVariables() {
+        return this.productContext?.variables?.length > 0;
+    }
+
+    get formattedContextVariables() {
+        if (!this.productContext?.variables) return [];
+        return this.productContext.variables.map(v => ({
+            ...v,
+            dataType: this.parseVariableCml(v.cml).dataType
+        }));
+    }
+
     get contextToggleIcon() {
         return this.contextExpanded ? 'utility:chevrondown' : 'utility:chevronright';
     }
@@ -295,7 +336,9 @@ export default class ConstraintStudio extends LightningElement {
     handleContextToggle() {
         this.contextExpanded = !this.contextExpanded;
     }
-    
+
+    // ==================== SNIPPETS TAB: LOAD & GROUP ====================
+
     async loadSnippets() {
         try {
             const data = await getCMLSnippets({
@@ -304,32 +347,27 @@ export default class ConstraintStudio extends LightningElement {
                 searchTerm: this.searchTerm,
                 cacheBuster: String(Date.now())
             });
-            console.log('Loaded snippets:', data);
             this.snippets = data;
             this.groupSnippets();
         } catch (error) {
             this.showToast('Error', 'Error loading CML Snippets: ' + error.body.message, 'error');
         }
     }
-    
+
     groupSnippets() {
-        // Reset groups
         Object.keys(this.groupedSnippets).forEach(key => {
             this.groupedSnippets[key].items = [];
         });
-        
-        // Group snippets by keyword found in CML__c
+
         this.snippets.forEach(snippet => {
             const cml = snippet.CML__c ? snippet.CML__c.toLowerCase() : '';
             let grouped = false;
-            
-            // Add isSelected property
+
             const enhancedSnippet = {
                 ...snippet,
                 isSelected: this.selectedSnippet && snippet.Id === this.selectedSnippet.Id ? 'snippet-item selected' : 'snippet-item'
             };
-            
-            // Check for each keyword
+
             if (cml.includes('constraint')) {
                 this.groupedSnippets.constraints.items.push(enhancedSnippet);
                 grouped = true;
@@ -350,14 +388,12 @@ export default class ConstraintStudio extends LightningElement {
                 this.groupedSnippets.rule.items.push(enhancedSnippet);
                 grouped = true;
             }
-            
-            // If no keyword found, add to constraints by default
             if (!grouped) {
                 this.groupedSnippets.constraints.items.push(enhancedSnippet);
             }
         });
     }
-    
+
     get sections() {
         return Object.keys(this.groupedSnippets).map(key => ({
             key: key,
@@ -368,51 +404,47 @@ export default class ConstraintStudio extends LightningElement {
             keyword: this.groupedSnippets[key].keyword
         }));
     }
-    
+
     get hasSelectedSnippet() {
         return this.selectedSnippet !== null;
     }
-    
+
     get displayLabel() {
         return this.editLabel || this.selectedSnippet?.Name || 'New Snippet';
     }
-    
+
     get highlightedCML() {
         if (!this.editCML) return '';
-        
         let highlighted = this.editCML;
         const keywords = ['constraint', 'require', 'message', 'setdefault', 'rule'];
-        
         keywords.forEach(keyword => {
             const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
             highlighted = highlighted.replace(regex, `<span class="keyword">${keyword}</span>`);
         });
-        
         return highlighted;
     }
-    
+
     get hasAnnotations() {
         return this.annotations && this.annotations.length > 0;
     }
 
-    
+    // ==================== SNIPPETS TAB: HANDLERS ====================
+
     handleSearchChange(event) {
         this.searchTerm = event.target.value;
-        // Reload snippets when search changes
         this.loadSnippets();
     }
-    
+
     handleToggleSection(event) {
         const sectionKey = event.currentTarget.dataset.key;
         this.groupedSnippets[sectionKey].expanded = !this.groupedSnippets[sectionKey].expanded;
-        // Force re-render
         this.groupedSnippets = { ...this.groupedSnippets };
     }
-    
+
     async handleAddSnippet(event) {
         const sectionKey = event.currentTarget.dataset.key;
         const keyword = this.groupedSnippets[sectionKey].keyword;
-        
+
         try {
             const newSnippet = await createCMLSnippet({
                 recordId: this.recordId,
@@ -420,44 +452,38 @@ export default class ConstraintStudio extends LightningElement {
                 keyword: keyword,
                 label: ''
             });
-            
+
             this.showToast('Success', 'CML Snippet created successfully', 'success');
-            
-            // Reload snippets
             await this.loadSnippets();
-            
-            // Select the new snippet with CML editor showing
+
             const refreshedSnippet = this.snippets.find(s => s.Id === newSnippet.Id);
             this.selectSnippet(refreshedSnippet || newSnippet, true);
         } catch (error) {
             this.showToast('Error', 'Error creating CML Snippet: ' + error.body.message, 'error');
         }
     }
-    
+
     async handleDeleteSnippet(event) {
         const snippetId = event.currentTarget.dataset.id;
         const snippetLabel = event.currentTarget.dataset.label;
         const snippetName = event.currentTarget.dataset.name;
         const displayName = snippetLabel || snippetName;
-        
+
         if (confirm(`Are you sure you want to delete "${displayName}"?`)) {
             try {
                 await deleteCMLSnippet({ snippetId: snippetId });
                 this.showToast('Success', 'CML Snippet deleted successfully', 'success');
-                
-                // Clear selection if deleted snippet was selected
+
                 if (this.selectedSnippet && this.selectedSnippet.Id === snippetId) {
                     this.selectedSnippet = null;
                 }
-                
-                // Reload snippets
                 await this.loadSnippets();
             } catch (error) {
                 this.showToast('Error', 'Error deleting CML Snippet: ' + error.body.message, 'error');
             }
         }
     }
-    
+
     handleSnippetClick(event) {
         const snippetId = event.currentTarget.dataset.id;
         const snippet = this.snippets.find(s => s.Id === snippetId);
@@ -465,26 +491,18 @@ export default class ConstraintStudio extends LightningElement {
             this.selectSnippet(snippet);
         }
     }
-    
+
     selectSnippet(snippet, isNewSnippet = false) {
         this.selectedSnippet = snippet;
         this.editLabel = snippet.Label__c || '';
 
-        // Parse the CML to extract active annotation and actual code
         const { isActive, cmlCode } = this.parseActiveAnnotation(snippet.CML__c || '');
         this.isActive = isActive;
-        
-        // Translate IDs to display names for editing
         this.editCML = this.translateToDisplayNames(cmlCode);
-        console.log('editCML set to:', this.editCML);
-        console.log('isActive set to:', this.isActive);
-        
-        // Show CML editor by default for new snippets
         this.showCMLEditor = isNewSnippet;
-        // Force re-render to update selection highlighting
         this.groupSnippets();
     }
-    
+
     parseActiveAnnotation(cmlText) {
         if (!cmlText) {
             this.annotations = [];
@@ -508,7 +526,6 @@ export default class ConstraintStudio extends LightningElement {
 
                 const key = part.substring(0, eqIdx).trim();
                 let val = part.substring(eqIdx + 1).trim();
-                // Remove quotes if present
                 val = val.replace(/^["']|["']$/g, '');
 
                 if (key === 'active') {
@@ -529,8 +546,7 @@ export default class ConstraintStudio extends LightningElement {
         this.annotations = [];
         return { isActive: true, cmlCode: cmlText };
     }
-    
-    // Convert MM/DD/YYYY to YYYY-MM-DD for lightning-input type="date"
+
     convertToISODate(dateStr) {
         if (!dateStr) return '';
         const parts = dateStr.split('/');
@@ -540,8 +556,7 @@ export default class ConstraintStudio extends LightningElement {
         }
         return dateStr;
     }
-    
-    // Convert YYYY-MM-DD to MM/DD/YYYY for storage
+
     convertToUSDate(isoDate) {
         if (!isoDate) return '';
         const parts = isoDate.split('-');
@@ -551,7 +566,7 @@ export default class ConstraintStudio extends LightningElement {
         }
         return isoDate;
     }
-    
+
     handleActiveToggle(event) {
         this.isActive = event.target.checked;
     }
@@ -565,7 +580,6 @@ export default class ConstraintStudio extends LightningElement {
     }
 
     buildGlobalCmlForSave() {
-        // Always PCG mode — prepend mode directive
         const props = this.globalProperties ? this.globalProperties.trim() : '';
         return props ? '// mode:pcg\n' + props : '// mode:pcg';
     }
@@ -598,50 +612,40 @@ export default class ConstraintStudio extends LightningElement {
             this.showToast('Error', 'Error saving global properties: ' + error.body?.message, 'error');
         }
     }
-    
+
     handleLabelChange(event) {
         this.editLabel = event.target.value;
     }
-    
+
     handleCMLChange(event) {
         this.editCML = event.detail.value;
     }
-    
+
     handleToggleCML(event) {
         this.showCMLEditor = event.target.checked;
     }
-    
+
     async handlePicklistRequest(event) {
         const { attributeName } = event.detail;
-        
         try {
-            // Fetch picklist values for this attribute
             const picklistValues = await getPicklistValues({
                 recordId: this.recordId,
                 objectApiName: this.objectApiName,
                 attributeName: attributeName
             });
-            
-            console.log('Picklist values fetched for', attributeName, ':', picklistValues);
-            
-            // Show picklist suggestions in the code editor
             const codeEditor = this.template.querySelector('c-cml-code-editor');
             if (codeEditor) {
                 codeEditor.showContextualSuggestions(picklistValues);
-            } else {
-                console.error('Code editor not found');
             }
         } catch (error) {
             console.error('Error fetching picklist values:', error);
         }
     }
-    
+
     async handleContextRequest(event) {
-        const { contextValue, searchTerm } = event.detail;
-        
-        // Extract ID and type from contextValue
+        const { contextValue } = event.detail;
+
         let contextId, contextType;
-        
         if (contextValue.startsWith('REL_ProductComponentGroup_')) {
             contextId = contextValue.replace('REL_ProductComponentGroup_', '');
             contextType = 'ProductComponentGroup';
@@ -649,52 +653,40 @@ export default class ConstraintStudio extends LightningElement {
             contextId = contextValue.replace('REL_ProductRelatedComponent_', '');
             contextType = 'ProductRelatedComponent';
         } else {
-            return; // Unknown context
+            return;
         }
-        
+
         try {
-            // Fetch contextual products
             const contextualProducts = await getContextualProducts({
                 contextId: contextId,
                 contextType: contextType
             });
-            
-            console.log('Contextual products fetched:', contextualProducts);
-            
-            // Add contextual products to allSuggestions for translation lookup
+
             contextualProducts.forEach(product => {
-                // Check if not already in allSuggestions
                 const exists = this.allSuggestions.find(s => s.value === product.value);
                 if (!exists) {
                     this.allSuggestions.push(product);
                 }
             });
-            
-            // Show contextual suggestions in the code editor
+
             const codeEditor = this.template.querySelector('c-cml-code-editor');
             if (codeEditor) {
                 codeEditor.showContextualSuggestions(contextualProducts);
-            } else {
-                console.error('Code editor not found');
             }
         } catch (error) {
             console.error('Error fetching contextual products:', error);
         }
     }
-    
+
     async handleSave() {
         if (!this.selectedSnippet) return;
-        
+
         this.isSaving = true;
         try {
-            // Translate display names back to IDs before saving (await because it's async now)
             let cmlToSave = await this.translateToIds(this.editCML);
-            
-            // Build annotation string
+
             const annotationParts = [`active=${this.isActive}`];
 
-            // Add all annotations — auto-detect value types (matches Core PropertyMixin)
-            // Booleans and numbers: unquoted. Strings: quoted.
             this.annotations.forEach(ann => {
                 if (ann.type && (ann.value !== undefined && ann.value !== '')) {
                     const val = ann.value;
@@ -707,23 +699,19 @@ export default class ConstraintStudio extends LightningElement {
                     }
                 }
             });
-            
-            // Combine all annotations
+
             const fullAnnotation = `@(${annotationParts.join(', ')})\n`;
             cmlToSave = fullAnnotation + cmlToSave;
-            
+
             await saveCMLSnippet({
                 snippetId: this.selectedSnippet.Id,
                 label: this.editLabel,
                 cml: cmlToSave
             });
-            
+
             this.showToast('Success', 'CML Snippet saved successfully', 'success');
-            
-            // Reload snippets
             await this.loadSnippets();
-            
-            // Update selected snippet
+
             const updatedSnippet = this.snippets.find(s => s.Id === this.selectedSnippet.Id);
             if (updatedSnippet) {
                 this.selectSnippet(updatedSnippet);
@@ -734,8 +722,8 @@ export default class ConstraintStudio extends LightningElement {
             this.isSaving = false;
         }
     }
-    
-    // Annotation handlers
+
+    // Snippet annotation handlers
     handleAddAnnotation() {
         const newAnnotation = {
             id: `annotation-${this.annotationCounter++}`,
@@ -744,30 +732,439 @@ export default class ConstraintStudio extends LightningElement {
         };
         this.annotations = [...this.annotations, newAnnotation];
     }
-    
+
     handleAnnotationTypeChange(event) {
         const annotationId = event.currentTarget.dataset.id;
         const newType = event.target.value;
-
         this.annotations = this.annotations.map(ann =>
             ann.id === annotationId ? { ...ann, type: newType } : ann
         );
     }
-    
+
     handleAnnotationValueChange(event) {
         const annotationId = event.currentTarget.dataset.id;
         const newValue = event.target.value;
-
         this.annotations = this.annotations.map(ann =>
             ann.id === annotationId ? { ...ann, value: newValue } : ann
         );
     }
-    
+
     handleDeleteAnnotation(event) {
         const annotationId = event.currentTarget.dataset.id;
         this.annotations = this.annotations.filter(ann => ann.id !== annotationId);
     }
-    
+
+    // ==================== F-01: ATTRIBUTES TAB LOGIC ====================
+
+    handleAttrSearchChange(event) {
+        this.attrSearchTerm = event.target.value;
+    }
+
+    handleToggleAttrSection(event) {
+        const key = event.currentTarget.dataset.key;
+        this.attrSectionExpandedMap = {
+            ...this.attrSectionExpandedMap,
+            [key]: !(this.attrSectionExpandedMap[key] !== false)
+        };
+    }
+
+    // Parse variable CML to extract dataType, domain, and annotations
+    parseVariableCml(cml) {
+        if (!cml) return { dataType: 'string', domain: [], annotations: {} };
+
+        // Strip @() annotation prefix
+        let declaration = cml.replace(/^@\([^)]*\)\s*/s, '').trim().replace(/;$/, '').trim();
+
+        const spaceIdx = declaration.indexOf(' ');
+        if (spaceIdx <= 0) return { dataType: 'string', domain: [], annotations: {} };
+
+        const dataType = declaration.substring(0, spaceIdx);
+        const rest = declaration.substring(spaceIdx + 1).trim();
+
+        // Check for default value or domain
+        const domain = [];
+        let defaultValue = '';
+        const eqIdx = rest.indexOf('=');
+        if (eqIdx > 0) {
+            const valStr = rest.substring(eqIdx + 1).trim();
+            const domainMatch = valStr.match(/\[(.*)\]/s);
+            if (domainMatch) {
+                // Domain values: = ["a", "b"]
+                const values = domainMatch[1].split(',').map(v => v.trim().replace(/^"|"$/g, '')).filter(v => v);
+                domain.push(...values);
+            } else {
+                // Single default value: = "Sharath"
+                defaultValue = valStr.replace(/^"|"$/g, '');
+            }
+        }
+
+        // Parse annotations
+        const annotations = {};
+        const annMatch = cml.match(/^@\(([^)]*)\)/);
+        if (annMatch) {
+            const parts = annMatch[1].split(',');
+            for (const part of parts) {
+                const kvMatch = part.trim().match(/^(\w+)\s*=\s*(.+)$/);
+                if (kvMatch) {
+                    const key = kvMatch[1];
+                    if (key !== 'active') {
+                        annotations[key] = kvMatch[2].trim().replace(/^"|"$/g, '');
+                    }
+                }
+            }
+        }
+
+        return { dataType, domain, annotations, defaultValue };
+    }
+
+    // Build sections for Attributes tab left pane
+    get attrSections() {
+        const sections = [];
+        const searchLower = (this.attrSearchTerm || '').toLowerCase();
+        const annSnippets = this.productContext?.annotationSnippets || [];
+
+        // This Product section
+        const thisItems = [];
+        const productAttrs = this.productContext?.productAttributes || [];
+        for (const attr of productAttrs) {
+            if (searchLower && !attr.name.toLowerCase().includes(searchLower)) continue;
+            const annSnippet = annSnippets.find(s => s.name === attr.name);
+            thisItems.push(this._buildAttrItem('sys-' + attr.name, attr.name, attr.dataType, attr.domain, 'sys', annSnippet));
+        }
+
+        const vars = this.productContext?.variables || [];
+        for (const v of vars) {
+            if (searchLower && !v.name.toLowerCase().includes(searchLower)) continue;
+            const parsed = this.parseVariableCml(v.cml);
+            const item = this._buildAttrItem('var-' + v.id, v.name, parsed.dataType, parsed.domain, 'var', null);
+            item.snippetId = v.id;
+            item.cml = v.cml;
+            item.isVar = true;
+            item.varAnnotations = parsed.annotations;
+            thisItems.push(item);
+        }
+
+        sections.push({
+            key: 'thisProduct',
+            label: 'This Product',
+            count: thisItems.length,
+            items: thisItems,
+            expanded: this.attrSectionExpandedMap.thisProduct !== false,
+            hasItems: thisItems.length > 0,
+            hasAdd: true
+        });
+
+        // Inherited section
+        const classAttrs = this.productContext?.classificationAttributes || [];
+        if (classAttrs.length > 0) {
+            const inheritedItems = [];
+            for (const attr of classAttrs) {
+                if (searchLower && !attr.name.toLowerCase().includes(searchLower)) continue;
+                inheritedItems.push(this._buildAttrItem('cls-' + attr.name, attr.name, attr.dataType, attr.domain, 'cls', null));
+            }
+            sections.push({
+                key: 'inherited',
+                label: 'Inherited: ' + (this.productContext?.classificationName || ''),
+                count: inheritedItems.length,
+                items: inheritedItems,
+                expanded: this.attrSectionExpandedMap.inherited !== false,
+                hasItems: inheritedItems.length > 0,
+                hasAdd: false
+            });
+        }
+
+        // Bundle child sections
+        const tree = this.productContext?.bundleTree || [];
+        for (const node of tree) {
+            if (node.nodeType === 'group') continue;
+            const nodeItems = [];
+            for (const attr of (node.attributes || [])) {
+                if (searchLower && !attr.name.toLowerCase().includes(searchLower)) continue;
+                const item = this._buildAttrItem(`child-${node.id}-${attr.name}`, attr.name, attr.dataType, attr.domain, 'sys', null);
+                item.readOnly = true;
+                nodeItems.push(item);
+            }
+            for (const v of (node.variables || [])) {
+                if (searchLower && !v.name.toLowerCase().includes(searchLower)) continue;
+                const parsed = this.parseVariableCml(v.cml);
+                const item = this._buildAttrItem(`childvar-${v.id}`, v.name, parsed.dataType, parsed.domain, 'var', null);
+                item.readOnly = true;
+                item.isVar = false; // read-only in parent — no delete
+                nodeItems.push(item);
+            }
+            if (nodeItems.length > 0) {
+                const sectionKey = 'child-' + node.id;
+                sections.push({
+                    key: sectionKey,
+                    label: node.name,
+                    count: nodeItems.length,
+                    items: nodeItems,
+                    expanded: this.attrSectionExpandedMap[sectionKey] !== false,
+                    hasItems: true,
+                    hasAdd: false
+                });
+            }
+        }
+
+        return sections;
+    }
+
+    _buildAttrItem(id, name, dataType, domain, source, annSnippet) {
+        const isSelected = this.selectedAttrItem && this.selectedAttrItem.id === id;
+        return {
+            id,
+            name,
+            dataType: dataType || 'string',
+            domain: domain || [],
+            source,
+            badge: source,
+            icon: source === 'var' ? 'utility:edit' : source === 'cls' ? 'utility:bookmark' : 'utility:settings',
+            badgeClass: `attr-badge ${source}`,
+            itemClass: isSelected ? 'snippet-item selected' : 'snippet-item',
+            isVar: source === 'var',
+            readOnly: false,
+            snippetId: annSnippet ? annSnippet.id : null,
+            annotationCml: annSnippet ? annSnippet.cml : '',
+            varAnnotations: {}
+        };
+    }
+
+    get hasSelectedAttrItem() {
+        return this.selectedAttrItem !== null;
+    }
+
+    get selectedAttrIsVar() {
+        return this.selectedAttrItem?.source === 'var';
+    }
+
+    get selectedAttrHasDomain() {
+        return this.selectedAttrItem?.domain?.length > 0 && this.selectedAttrItem?.source !== 'var';
+    }
+
+    get selectedAttrDomainStr() {
+        return this.selectedAttrItem?.domain?.join(', ') || '';
+    }
+
+    get hasAttrAnnotations() {
+        return this.attrAnnotations && this.attrAnnotations.length > 0;
+    }
+
+    handleAttrItemClick(event) {
+        const itemId = event.currentTarget.dataset.id;
+        // Find the item across all sections
+        for (const section of this.attrSections) {
+            const item = section.items.find(i => i.id === itemId);
+            if (item) {
+                this.selectAttrItem(item);
+                break;
+            }
+        }
+    }
+
+    selectAttrItem(item) {
+        this.selectedAttrItem = { ...item };
+
+        if (item.source === 'var') {
+            // For variables: populate editable fields
+            const parsed = this.parseVariableCml(item.cml);
+            this.editAttrName = item.name;
+            this.editAttrType = parsed.dataType || 'string';
+            this.editAttrDomain = parsed.domain ? parsed.domain.map(v => `"${v}"`).join(', ') : '';
+            this.editAttrDefaultValue = parsed.defaultValue || '';
+
+            // Parse annotations from variable CML
+            const anns = parsed.annotations || {};
+            this.attrAnnotations = Object.entries(anns).map(([key, value]) => ({
+                id: `aann-${this.attrAnnotationCounter++}`,
+                type: key,
+                value: String(value)
+            }));
+        } else {
+            // For sys/cls: populate from annotation snippet
+            this.editAttrName = item.name;
+            this.editAttrType = item.dataType;
+            this.editAttrDomain = '';
+
+            // Parse annotations from annotation snippet CML
+            this.attrAnnotations = [];
+            if (item.annotationCml) {
+                const annMatch = item.annotationCml.match(/@\(([^)]*)\)/);
+                if (annMatch) {
+                    const parts = annMatch[1].split(',');
+                    for (const part of parts) {
+                        const kvMatch = part.trim().match(/^(\w+)\s*=\s*(.+)$/);
+                        if (kvMatch) {
+                            this.attrAnnotations.push({
+                                id: `aann-${this.attrAnnotationCounter++}`,
+                                type: kvMatch[1],
+                                value: kvMatch[2].trim().replace(/^"|"$/g, '')
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    handleAttrNameChange(event) {
+        this.editAttrName = event.target.value;
+    }
+
+    handleAttrTypeChange(event) {
+        this.editAttrType = event.detail.value;
+    }
+
+    handleAttrDomainChange(event) {
+        this.editAttrDomain = event.target.value;
+    }
+
+    handleAttrDefaultValueChange(event) {
+        this.editAttrDefaultValue = event.target.value;
+    }
+
+    // Attribute annotation handlers
+    handleAddAttrAnnotation() {
+        this.attrAnnotations = [...this.attrAnnotations, {
+            id: `aann-${this.attrAnnotationCounter++}`,
+            type: '',
+            value: ''
+        }];
+    }
+
+    handleAttrAnnotationTypeChange(event) {
+        const id = event.currentTarget.dataset.id;
+        const newType = event.target.value;
+        this.attrAnnotations = this.attrAnnotations.map(a =>
+            a.id === id ? { ...a, type: newType } : a
+        );
+    }
+
+    handleAttrAnnotationValueChange(event) {
+        const id = event.currentTarget.dataset.id;
+        const newValue = event.target.value;
+        this.attrAnnotations = this.attrAnnotations.map(a =>
+            a.id === id ? { ...a, value: newValue } : a
+        );
+    }
+
+    handleDeleteAttrAnnotation(event) {
+        const id = event.currentTarget.dataset.id;
+        this.attrAnnotations = this.attrAnnotations.filter(a => a.id !== id);
+    }
+
+    // Build annotation CML string from attrAnnotations
+    _buildAnnotationCml() {
+        const parts = [];
+        for (const ann of this.attrAnnotations) {
+            if (!ann.type) continue;
+            const val = ann.value;
+            if (val === 'true' || val === 'false') {
+                parts.push(`${ann.type}=${val}`);
+            } else if (!isNaN(val) && val !== '') {
+                parts.push(`${ann.type}=${val}`);
+            } else {
+                parts.push(`${ann.type}="${val}"`);
+            }
+        }
+        return parts.length > 0 ? `@(${parts.join(', ')})` : '';
+    }
+
+    // Save attribute/variable
+    async handleSaveAttr() {
+        if (!this.selectedAttrItem) return;
+        this.isSavingAttr = true;
+
+        try {
+            if (this.selectedAttrItem.source === 'var') {
+                // Save variable
+                const annotationCml = this._buildAnnotationCml();
+                await saveVariableSnippet({
+                    recordId: this.recordId,
+                    objectApiName: this.objectApiName,
+                    snippetId: this.selectedAttrItem.snippetId || null,
+                    varName: this.editAttrName,
+                    varType: this.editAttrType,
+                    domainValues: this.editAttrDomain,
+                    defaultValue: this.editAttrDefaultValue,
+                    annotationCml: annotationCml
+                });
+                this.showToast('Success', 'Variable saved', 'success');
+            } else {
+                // Save attribute annotation
+                const annotationCml = this._buildAnnotationCml();
+                await saveAnnotationSnippet({
+                    recordId: this.recordId,
+                    objectApiName: this.objectApiName,
+                    snippetId: this.selectedAttrItem.snippetId || null,
+                    attributeName: this.selectedAttrItem.name,
+                    annotationCml: annotationCml
+                });
+                this.showToast('Success', 'Annotation saved', 'success');
+            }
+
+            // Reload product context to refresh variables and annotations
+            await this.loadProductContext();
+            // Re-select the item to refresh editor state
+            const itemId = this.selectedAttrItem.id;
+            this.selectedAttrItem = null;
+            // Wait for reactivity, then find and re-select
+            // eslint-disable-next-line @lwc/lwc/no-async-operation
+            setTimeout(() => {
+                for (const section of this.attrSections) {
+                    const item = section.items.find(i => i.id === itemId || i.name === this.editAttrName);
+                    if (item) {
+                        this.selectAttrItem(item);
+                        break;
+                    }
+                }
+            }, 100);
+        } catch (error) {
+            this.showToast('Error', 'Error saving: ' + (error.body?.message || error.message), 'error');
+        } finally {
+            this.isSavingAttr = false;
+        }
+    }
+
+    // Add variable
+    async handleAddVariable() {
+        try {
+            await saveVariableSnippet({
+                recordId: this.recordId,
+                objectApiName: this.objectApiName,
+                snippetId: null,
+                varName: 'NewVariable',
+                varType: 'string',
+                domainValues: '',
+                defaultValue: '',
+                annotationCml: ''
+            });
+            this.showToast('Success', 'Variable created', 'success');
+            await this.loadProductContext();
+        } catch (error) {
+            this.showToast('Error', 'Error creating variable: ' + (error.body?.message || error.message), 'error');
+        }
+    }
+
+    // Delete variable
+    async handleDeleteVariable(event) {
+        const snippetId = event.currentTarget.dataset.id;
+        if (!confirm('Delete this variable?')) return;
+
+        try {
+            await deleteCMLSnippet({ snippetId: snippetId });
+            this.showToast('Success', 'Variable deleted', 'success');
+
+            if (this.selectedAttrItem && this.selectedAttrItem.snippetId === snippetId) {
+                this.selectedAttrItem = null;
+            }
+            await this.loadProductContext();
+        } catch (error) {
+            this.showToast('Error', 'Error deleting variable: ' + (error.body?.message || error.message), 'error');
+        }
+    }
+
+    // ==================== UTILITIES ====================
+
     showToast(title, message, variant) {
         this.dispatchEvent(new ShowToastEvent({
             title: title,

@@ -55,6 +55,9 @@ public with sharing class CMLGeneratorV2 {
         public String dataType; // 'string', 'decimal(2)', 'boolean', 'date'
         public List<String> domainValues; // picklist values
         public Map<String, Object> properties; // defaultValue, configurable, etc.
+        public Boolean isUserVariable = false; // F-01: true for user-created variables
+        public Boolean hasUserAnnotation = false; // F-01: true when user explicitly annotated this attr
+        public String defaultValue; // F-01: single default value for inline rendering (e.g., = "Sharath")
 
         public CMLAttr() {
             this.domainValues = new List<String>();
@@ -697,6 +700,7 @@ public with sharing class CMLGeneratorV2 {
                     CMLType type = typeMap.get(s.ParentProduct2__c);
                     if (type != null) {
                         String raw = s.CML__c;
+                        // Type-level annotations (existing)
                         if (raw.contains('virtual') && raw.contains('true')) {
                             type.properties.put('virtual', true);
                         }
@@ -706,6 +710,26 @@ public with sharing class CMLGeneratorV2 {
                             if (m.find()) {
                                 type.properties.put('sourceContextNode', m.group(1));
                             }
+                        }
+                        // F-01: Attribute-level annotations (Label__c = attribute developer name)
+                        if (String.isNotBlank(s.Label__c)) {
+                            for (CMLAttr attr : type.attributes) {
+                                if (attr.name == s.Label__c) {
+                                    parseAnnotationIntoProperties(raw, attr.properties);
+                                    attr.hasUserAnnotation = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                // F-01: Variable snippets -> parse into CMLAttr, add to type
+                else if (s.Object__c == 'Product2' && s.Type__c == 'variable' && s.ParentProduct2__c != null) {
+                    CMLType type = typeMap.get(s.ParentProduct2__c);
+                    if (type != null) {
+                        CMLAttr varAttr = parseVariableSnippet(s);
+                        if (varAttr != null) {
+                            type.attributes.add(varAttr);
                         }
                     }
                 }
@@ -782,6 +806,58 @@ public with sharing class CMLGeneratorV2 {
     }
 
     /**
+     * F-01: Parse a variable CMLSnippet into a CMLAttr.
+     * CML format: "@(defaultValue="10")\ndecimal(2) MyVar;" or "string MyVar = ["a", "b"];"
+     */
+    private static CMLAttr parseVariableSnippet(CMLSnippet__c varSnippet) {
+        String cml = varSnippet.CML__c;
+        if (String.isBlank(cml)) return null;
+
+        CMLAttr attr = new CMLAttr();
+        attr.name = varSnippet.Label__c;
+        attr.isUserVariable = true;
+
+        // Parse annotation properties from @(...) prefix
+        Pattern annPattern = Pattern.compile('^@\\(([^)]*)\\)');
+        Matcher annMatcher = annPattern.matcher(cml.trim());
+        if (annMatcher.find()) {
+            parseAnnotationIntoProperties(annMatcher.group(1), attr.properties);
+            attr.properties.remove('active');
+        }
+
+        // Parse declaration (after stripping annotation)
+        String declaration = stripAnnotationPrefix(cml).trim().replaceFirst(';$', '').trim();
+        Integer spaceIdx = declaration.indexOf(' ');
+        if (spaceIdx > 0) {
+            attr.dataType = declaration.substring(0, spaceIdx).trim();
+            String rest = declaration.substring(spaceIdx + 1).trim();
+
+            // Check for default value or domain values
+            Integer eqIdx = rest.indexOf('=');
+            if (eqIdx > 0) {
+                String valPart = rest.substring(eqIdx + 1).trim();
+                if (valPart.startsWith('[') && valPart.endsWith(']')) {
+                    // Domain values: = ["a", "b"]
+                    String domainInner = valPart.substring(1, valPart.length() - 1);
+                    for (String val : domainInner.split(',')) {
+                        String trimVal = val.trim().replaceAll('^"|"$', '');
+                        if (String.isNotBlank(trimVal)) {
+                            attr.domainValues.add(trimVal);
+                        }
+                    }
+                } else {
+                    // Single default value: = "Sharath"
+                    attr.defaultValue = valPart.replaceAll('^"|"$', '');
+                }
+            }
+        } else {
+            attr.dataType = 'string';
+        }
+
+        return attr;
+    }
+
+    /**
      * Build a map of ID-based patterns → PascalCase/lowercase names for constraint translation.
      * Handles: REL_ProductRelatedComponent_<id>, REL_ProductComponentGroup_<id>, Product2_<id>
      */
@@ -845,6 +921,16 @@ public with sharing class CMLGeneratorV2 {
         for (Id key : typeMap.keySet()) {
             CMLType t = typeMap.get(key);
             Boolean hasContent = !t.constraints.isEmpty() || !t.properties.isEmpty();
+
+            // F-01: Also seed types that have user variables or user-annotated attributes
+            if (!hasContent) {
+                for (CMLAttr attr : t.attributes) {
+                    if (attr.isUserVariable || attr.hasUserAnnotation) {
+                        hasContent = true;
+                        break;
+                    }
+                }
+            }
 
             if (hasContent) {
                 neededTypeIds.add(key);
@@ -999,12 +1085,22 @@ public with sharing class CMLGeneratorV2 {
                 allConstraintText += ' ' + c;
             }
         }
-        // For each type, keep only attributes mentioned in constraints
-        // Use word-boundary regex to avoid substring false positives
-        // (e.g., attribute "Printer" matching "PrinterBundle")
+        // For each type, keep only attributes mentioned in constraints,
+        // plus F-01: user-defined variables and attributes with user annotations
         for (CMLType t : typeMap.values()) {
             List<CMLAttr> keptAttrs = new List<CMLAttr>();
             for (CMLAttr attr : t.attributes) {
+                // F-01: Always keep user-defined variables
+                if (attr.isUserVariable) {
+                    keptAttrs.add(attr);
+                    continue;
+                }
+                // F-01: Keep attributes with user-defined annotations
+                if (attr.hasUserAnnotation) {
+                    keptAttrs.add(attr);
+                    continue;
+                }
+                // Keep if referenced in constraint text (word-boundary match)
                 Pattern attrPattern = Pattern.compile('\\b' + attr.name + '\\b');
                 Matcher attrMatcher = attrPattern.matcher(allConstraintText);
                 if (attrMatcher.find()) {
@@ -1159,8 +1255,13 @@ public with sharing class CMLGeneratorV2 {
         // Type and name
         output += '    ' + attr.dataType + ' ' + attr.name;
 
+        // Single default value (F-01: e.g., string abc = "Sharath", decimal(2) x = 1.5)
+        if (String.isNotBlank(attr.defaultValue)) {
+            Boolean needsQuotes = attr.dataType == 'string' || attr.dataType == 'date';
+            output += needsQuotes ? ' = "' + attr.defaultValue + '"' : ' = ' + attr.defaultValue;
+        }
         // Domain values (picklist)
-        if (!attr.domainValues.isEmpty()) {
+        else if (!attr.domainValues.isEmpty()) {
             List<String> quoted = new List<String>();
             for (String v : attr.domainValues) {
                 quoted.add('"' + v + '"');

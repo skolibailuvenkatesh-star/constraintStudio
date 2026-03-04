@@ -1,477 +1,692 @@
 <template>
     <div class="constraint-studio">
+        <!-- Tab Bar -->
+        <div class="tab-bar">
+            <button class={snippetsTabClass} data-tab="snippets" onclick={handleTabChange}>Snippets</button>
+            <button class={attributesTabClass} data-tab="attributes" onclick={handleTabChange}>Attributes &amp; Variables</button>
+        </div>
+
         <div class="studio-container">
-            <!-- Left Pane: Explorer -->
+            <!-- Left Pane -->
             <div class="left-pane">
-                <!-- Search Bar + Import -->
-                <div class="search-container">
-                    <lightning-input
-                        type="search"
-                        label="Search"
-                        variant="label-hidden"
-                        placeholder="Search..."
-                        value={searchTerm}
-                        onchange={handleSearchChange}
-                        class="search-input">
-                    </lightning-input>
-                </div>
-
-                <!-- Global Properties -->
-                <div class="global-properties-container">
-                    <div class="global-properties-header">
-                        <span class="global-properties-title">Global Properties</span>
-                        <lightning-button-icon
-                            icon-name="utility:save"
-                            variant="bare"
-                            alternative-text="Save"
-                            title="Save Global Properties"
-                            onclick={handleGlobalPropertiesSave}
-                            class="global-save-button">
-                        </lightning-button-icon>
-                    </div>
-                    <div class="mode-toggle-container">
-                        <span class="mode-toggle-label">Flat</span>
+                <!-- ===== SNIPPETS TAB: Left Pane ===== -->
+                <template if:true={isSnippetsTab}>
+                    <!-- Search Bar -->
+                    <div class="search-container">
                         <lightning-input
-                            type="toggle"
-                            label="CML Mode"
+                            type="search"
+                            label="Search"
                             variant="label-hidden"
-                            checked={isPCGMode}
-                            onchange={handleModeToggle}
-                            class="mode-toggle-input"
-                            message-toggle-active=""
-                            message-toggle-inactive=""
-                            disabled>
+                            placeholder="Search..."
+                            value={searchTerm}
+                            onchange={handleSearchChange}
+                            class="search-input">
                         </lightning-input>
-                        <span class="mode-toggle-label pcg-active">PCG</span>
                     </div>
-                    <lightning-textarea
-                        label="Global Properties"
-                        variant="label-hidden"
-                        value={globalProperties}
-                        placeholder="extern string Country;&#10;property key = &quot;value&quot;;"
-                        onchange={handleGlobalPropertiesChange}
-                        class="global-properties-input">
-                    </lightning-textarea>
-                </div>
 
-                <!-- Sections -->
-                <div class="sections-container">
-                    <template for:each={sections} for:item="section">
-                        <div key={section.key} class="section">
-                            <!-- Section Header -->
-                            <div class="section-header">
-                                <div class="section-title" data-key={section.key} onclick={handleToggleSection}>
-                                    <template if:true={section.expanded}>
-                                        <lightning-icon 
-                                            icon-name="utility:chevrondown"
-                                            size="x-small"
-                                            class="section-icon">
-                                        </lightning-icon>
-                                    </template>
-                                    <template if:false={section.expanded}>
-                                        <lightning-icon 
-                                            icon-name="utility:chevronright"
-                                            size="x-small"
-                                            class="section-icon">
-                                        </lightning-icon>
-                                    </template>
-                                    <span class="section-label">{section.label}</span>
-                                    <span class="section-count">({section.items.length})</span>
+                    <!-- Global Properties -->
+                    <div class="global-properties-container">
+                        <div class="global-properties-header">
+                            <span class="global-properties-title">Global Properties</span>
+                            <lightning-button-icon
+                                icon-name="utility:save"
+                                variant="bare"
+                                alternative-text="Save"
+                                title="Save Global Properties"
+                                onclick={handleGlobalPropertiesSave}
+                                class="global-save-button">
+                            </lightning-button-icon>
+                        </div>
+                        <div class="mode-toggle-container">
+                            <span class="mode-toggle-label">Flat</span>
+                            <lightning-input
+                                type="toggle"
+                                label="CML Mode"
+                                variant="label-hidden"
+                                checked={isPCGMode}
+                                onchange={handleModeToggle}
+                                class="mode-toggle-input"
+                                message-toggle-active=""
+                                message-toggle-inactive=""
+                                disabled>
+                            </lightning-input>
+                            <span class="mode-toggle-label pcg-active">PCG</span>
+                        </div>
+                        <lightning-textarea
+                            label="Global Properties"
+                            variant="label-hidden"
+                            value={globalProperties}
+                            placeholder="extern string Country;&#10;property key = &quot;value&quot;;"
+                            onchange={handleGlobalPropertiesChange}
+                            class="global-properties-input">
+                        </lightning-textarea>
+                    </div>
+
+                    <!-- Sections -->
+                    <div class="sections-container">
+                        <template for:each={sections} for:item="section">
+                            <div key={section.key} class="section">
+                                <!-- Section Header -->
+                                <div class="section-header">
+                                    <div class="section-title" data-key={section.key} onclick={handleToggleSection}>
+                                        <template if:true={section.expanded}>
+                                            <lightning-icon
+                                                icon-name="utility:chevrondown"
+                                                size="x-small"
+                                                class="section-icon">
+                                            </lightning-icon>
+                                        </template>
+                                        <template if:false={section.expanded}>
+                                            <lightning-icon
+                                                icon-name="utility:chevronright"
+                                                size="x-small"
+                                                class="section-icon">
+                                            </lightning-icon>
+                                        </template>
+                                        <span class="section-label">{section.label}</span>
+                                        <span class="section-count">({section.items.length})</span>
+                                    </div>
+                                    <lightning-button-icon
+                                        icon-name="utility:add"
+                                        variant="bare"
+                                        alternative-text="Add Snippet"
+                                        title="Add Snippet"
+                                        data-key={section.key}
+                                        onclick={handleAddSnippet}
+                                        class="add-button">
+                                    </lightning-button-icon>
                                 </div>
-                                <lightning-button-icon
-                                    icon-name="utility:add"
-                                    variant="bare"
-                                    alternative-text="Add Snippet"
-                                    title="Add Snippet"
-                                    data-key={section.key}
-                                    onclick={handleAddSnippet}
-                                    class="add-button">
-                                </lightning-button-icon>
+
+                                <!-- Section Items -->
+                                <template if:true={section.expanded}>
+                                    <div class="section-items">
+                                        <template if:true={section.hasItems}>
+                                            <template for:each={section.items} for:item="snippet">
+                                                <div key={snippet.Id} class={snippet.isSelected}>
+                                                    <div
+                                                        class="snippet-content"
+                                                        data-id={snippet.Id}
+                                                        onclick={handleSnippetClick}>
+                                                        <lightning-icon
+                                                            icon-name="utility:text"
+                                                            size="x-small"
+                                                            class="snippet-icon">
+                                                        </lightning-icon>
+                                                        <template if:true={snippet.Label__c}>
+                                                            <span class="snippet-label">
+                                                                {snippet.Label__c}
+                                                            </span>
+                                                        </template>
+                                                        <template if:false={snippet.Label__c}>
+                                                            <span class="snippet-label">
+                                                                {snippet.Name}
+                                                            </span>
+                                                        </template>
+                                                    </div>
+                                                    <lightning-button-icon
+                                                        icon-name="utility:delete"
+                                                        variant="bare"
+                                                        alternative-text="Delete"
+                                                        title="Delete"
+                                                        data-id={snippet.Id}
+                                                        data-label={snippet.Label__c}
+                                                        data-name={snippet.Name}
+                                                        onclick={handleDeleteSnippet}
+                                                        class="delete-button">
+                                                    </lightning-button-icon>
+                                                </div>
+                                            </template>
+                                        </template>
+                                        <template if:false={section.hasItems}>
+                                            <div class="empty-section">
+                                                No snippets
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
                             </div>
-                            
-                            <!-- Section Items -->
-                            <template if:true={section.expanded}>
-                                <div class="section-items">
-                                    <template if:true={section.hasItems}>
-                                        <template for:each={section.items} for:item="snippet">
-                                            <div key={snippet.Id} class={snippet.isSelected}>
-                                                <div 
-                                                    class="snippet-content"
-                                                    data-id={snippet.Id}
-                                                    onclick={handleSnippetClick}>
-                                                    <lightning-icon 
-                                                        icon-name="utility:text"
-                                                        size="x-small"
-                                                        class="snippet-icon">
-                                                    </lightning-icon>
-                                                    <template if:true={snippet.Label__c}>
-                                                        <span class="snippet-label">
-                                                            {snippet.Label__c}
-                                                        </span>
-                                                    </template>
-                                                    <template if:false={snippet.Label__c}>
-                                                        <span class="snippet-label">
-                                                            {snippet.Name}
-                                                        </span>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- ===== ATTRIBUTES TAB: Left Pane ===== -->
+                <template if:true={isAttributesTab}>
+                    <div class="search-container">
+                        <lightning-input
+                            type="search"
+                            label="Search attributes"
+                            variant="label-hidden"
+                            placeholder="Search attributes..."
+                            value={attrSearchTerm}
+                            onchange={handleAttrSearchChange}
+                            class="search-input">
+                        </lightning-input>
+                    </div>
+
+                    <div class="sections-container">
+                        <template for:each={attrSections} for:item="asection">
+                            <div key={asection.key} class="section">
+                                <div class="section-header">
+                                    <div class="section-title" data-key={asection.key} onclick={handleToggleAttrSection}>
+                                        <template if:true={asection.expanded}>
+                                            <lightning-icon icon-name="utility:chevrondown" size="x-small" class="section-icon"></lightning-icon>
+                                        </template>
+                                        <template if:false={asection.expanded}>
+                                            <lightning-icon icon-name="utility:chevronright" size="x-small" class="section-icon"></lightning-icon>
+                                        </template>
+                                        <span class="section-label">{asection.label}</span>
+                                        <span class="section-count">({asection.count})</span>
+                                    </div>
+                                    <template if:true={asection.hasAdd}>
+                                        <lightning-button-icon
+                                            icon-name="utility:add"
+                                            variant="bare"
+                                            alternative-text="Add Variable"
+                                            title="Add Variable"
+                                            onclick={handleAddVariable}
+                                            class="add-button">
+                                        </lightning-button-icon>
+                                    </template>
+                                </div>
+                                <template if:true={asection.expanded}>
+                                    <div class="section-items">
+                                        <template if:true={asection.hasItems}>
+                                            <template for:each={asection.items} for:item="aitem">
+                                                <div key={aitem.id} class={aitem.itemClass}>
+                                                    <div class="snippet-content" data-id={aitem.id} onclick={handleAttrItemClick}>
+                                                        <lightning-icon icon-name={aitem.icon} size="x-small" class="snippet-icon"></lightning-icon>
+                                                        <span class="snippet-label">{aitem.name}</span>
+                                                        <span class={aitem.badgeClass}>{aitem.badge}</span>
+                                                    </div>
+                                                    <template if:true={aitem.isVar}>
+                                                        <lightning-button-icon
+                                                            icon-name="utility:delete"
+                                                            variant="bare"
+                                                            alternative-text="Delete"
+                                                            title="Delete"
+                                                            data-id={aitem.snippetId}
+                                                            onclick={handleDeleteVariable}
+                                                            class="delete-button">
+                                                        </lightning-button-icon>
                                                     </template>
                                                 </div>
+                                            </template>
+                                        </template>
+                                        <template if:false={asection.hasItems}>
+                                            <div class="empty-section">No attributes</div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Right Pane -->
+            <div class="right-pane">
+                <!-- ===== SNIPPETS TAB: Right Pane ===== -->
+                <template if:true={isSnippetsTab}>
+                    <template if:true={hasSelectedSnippet}>
+                        <div class="editor-container">
+                            <!-- Header with Label, Active Toggle, and Save Button -->
+                            <div class="editor-header">
+                                <lightning-input
+                                    type="text"
+                                    label="Label"
+                                    variant="label-hidden"
+                                    value={editLabel}
+                                    onchange={handleLabelChange}
+                                    placeholder="Enter label..."
+                                    class="label-input">
+                                </lightning-input>
+                                <div class="active-toggle-container">
+                                    <span class="toggle-label">Active</span>
+                                    <lightning-input
+                                        type="toggle"
+                                        label="Active"
+                                        variant="label-hidden"
+                                        checked={isActive}
+                                        onchange={handleActiveToggle}
+                                        class="active-toggle">
+                                    </lightning-input>
+                                </div>
+                                <lightning-button
+                                    label="Save"
+                                    variant="brand"
+                                    onclick={handleSave}
+                                    disabled={isSaving}
+                                    class="save-button">
+                                </lightning-button>
+                            </div>
+
+                            <!-- CML Toggle -->
+                            <div class="toggle-container">
+                                <div class="toggle-wrapper">
+                                    <span class="toggle-label">CML</span>
+                                    <lightning-input
+                                        type="toggle"
+                                        label="CML"
+                                        variant="label-hidden"
+                                        checked={showCMLEditor}
+                                        onchange={handleToggleCML}
+                                        class="cml-toggle">
+                                    </lightning-input>
+                                </div>
+                            </div>
+
+                            <!-- Visual Editor (when toggle is OFF) -->
+                            <template if:false={showCMLEditor}>
+                                <div class="visual-editor">
+                                    <div class="visual-section">
+                                        <div class="visual-header">
+                                            <span class="visual-badge">WHEN</span>
+                                            <lightning-icon icon-name="utility:chevrondown" size="x-small"></lightning-icon>
+                                        </div>
+                                        <div class="visual-content">
+                                            <div class="visual-row">
+                                                <div class="visual-field">
+                                                    <label class="visual-label">* Element</label>
+                                                    <lightning-combobox label="Element" variant="label-hidden" placeholder="Select Transaction Header" class="visual-input" disabled></lightning-combobox>
+                                                </div>
+                                                <div class="visual-field">
+                                                    <label class="visual-label">Operator</label>
+                                                    <lightning-combobox label="Operator" variant="label-hidden" placeholder="Is Not Equals" class="visual-input" disabled></lightning-combobox>
+                                                </div>
+                                                <div class="visual-field">
+                                                    <label class="visual-label">* Element</label>
+                                                    <lightning-input type="text" label="Element" variant="label-hidden" placeholder="Value = US" class="visual-input" disabled></lightning-input>
+                                                </div>
+                                            </div>
+                                            <div class="visual-info">
+                                                <lightning-icon icon-name="utility:info" size="x-small"></lightning-icon>
+                                                <span class="visual-info-text">* Grouping Logic: 1</span>
+                                            </div>
+                                            <div class="visual-description">
+                                                Group expressions within '()' and connect the groups using 'and', 'or', or 'xor' logic. When the logic contains mixed operators, always group expressions by using '()' to define the exact evaluation order.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="visual-section">
+                                        <div class="visual-header">
+                                            <span class="visual-badge">DISPLAY</span>
+                                        </div>
+                                        <div class="visual-content">
+                                            <div class="visual-field">
+                                                <label class="visual-label">Message Type</label>
+                                                <lightning-combobox label="Message Type" variant="label-hidden" placeholder="Informational" class="visual-input" disabled></lightning-combobox>
+                                            </div>
+                                            <div class="visual-field">
+                                                <label class="visual-label">* Run-time Message</label>
+                                                <lightning-input type="text" label="Run-time Message" variant="label-hidden" placeholder="Not in US" class="visual-input" disabled></lightning-input>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Code Editor (when toggle is ON) -->
+                            <template if:true={showCMLEditor}>
+                                <div class="code-editor">
+                                    <c-cml-code-editor
+                                        value={editCML}
+                                        attribute-definitions={attributeDefinitions}
+                                        onchange={handleCMLChange}
+                                        onrequestcontext={handleContextRequest}
+                                        onrequestpicklist={handlePicklistRequest}>
+                                    </c-cml-code-editor>
+                                </div>
+                            </template>
+
+                            <!-- Annotations Section -->
+                            <div class="annotations-section">
+                                <div class="annotations-header">
+                                    <span class="annotations-title">Annotations</span>
+                                    <lightning-button-icon
+                                        icon-name="utility:add"
+                                        variant="bare"
+                                        alternative-text="Add Annotation"
+                                        title="Add Annotation"
+                                        onclick={handleAddAnnotation}
+                                        class="add-annotation-button">
+                                    </lightning-button-icon>
+                                </div>
+                                <div class="annotations-list">
+                                    <template if:true={hasAnnotations}>
+                                        <template for:each={annotations} for:item="annotation">
+                                            <div key={annotation.id} class="annotation-item">
+                                                <lightning-input
+                                                    type="text"
+                                                    label="Key"
+                                                    variant="label-hidden"
+                                                    value={annotation.type}
+                                                    placeholder="Key (e.g., startDate)"
+                                                    data-id={annotation.id}
+                                                    onchange={handleAnnotationTypeChange}
+                                                    class="annotation-type">
+                                                </lightning-input>
+                                                <lightning-input
+                                                    type="text"
+                                                    label="Value"
+                                                    variant="label-hidden"
+                                                    value={annotation.value}
+                                                    placeholder="Value"
+                                                    data-id={annotation.id}
+                                                    onchange={handleAnnotationValueChange}
+                                                    class="annotation-value">
+                                                </lightning-input>
                                                 <lightning-button-icon
                                                     icon-name="utility:delete"
                                                     variant="bare"
                                                     alternative-text="Delete"
                                                     title="Delete"
-                                                    data-id={snippet.Id}
-                                                    data-label={snippet.Label__c}
-                                                    data-name={snippet.Name}
-                                                    onclick={handleDeleteSnippet}
-                                                    class="delete-button">
+                                                    data-id={annotation.id}
+                                                    onclick={handleDeleteAnnotation}
+                                                    class="delete-annotation-button">
                                                 </lightning-button-icon>
                                             </div>
                                         </template>
                                     </template>
-                                    <template if:false={section.hasItems}>
-                                        <div class="empty-section">
-                                            No snippets
+                                    <template if:false={hasAnnotations}>
+                                        <div class="no-annotations">No annotations</div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <template if:false={hasSelectedSnippet}>
+                        <div class="placeholder">
+                            <div class="placeholder-content">
+                                <lightning-icon icon-name="utility:text" size="large" class="placeholder-icon"></lightning-icon>
+                                <p class="placeholder-text">Select a snippet to edit or create a new one</p>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Available Context Panel -->
+                    <template if:true={hasProductContext}>
+                        <div class="context-panel">
+                            <div class="context-header" onclick={handleContextToggle}>
+                                <lightning-icon icon-name={contextToggleIcon} size="x-small" class="context-toggle-icon"></lightning-icon>
+                                <span class="context-title">Available Context</span>
+                            </div>
+                            <template if:true={contextExpanded}>
+                                <div class="context-body">
+                                    <!-- Classification Attributes (inherited) -->
+                                    <template if:true={hasClassificationAttributes}>
+                                        <div class="context-section">
+                                            <div class="context-section-header">
+                                                <span class="context-section-label">Classification: {productContext.classificationName}</span>
+                                            </div>
+                                            <div class="context-items">
+                                                <template for:each={formattedClassificationAttributes} for:item="attr">
+                                                    <div key={attr.name} class="context-attr-row">
+                                                        <div class="context-item">
+                                                            <span class="context-item-type">{attr.dataType}</span>
+                                                            <span class="context-item-name">{attr.name}</span>
+                                                            <span class="context-item-badge inherited">Inherited</span>
+                                                        </div>
+                                                        <template if:true={attr.hasDomain}>
+                                                            <div class="context-domain">= [{attr.domainStr}]</div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- Product Attributes -->
+                                    <template if:true={hasProductAttributes}>
+                                        <div class="context-section">
+                                            <div class="context-section-header">
+                                                <span class="context-section-label">Product Attributes</span>
+                                            </div>
+                                            <div class="context-items">
+                                                <template for:each={formattedProductAttributes} for:item="attr">
+                                                    <div key={attr.name} class="context-attr-row">
+                                                        <div class="context-item">
+                                                            <span class="context-item-type">{attr.dataType}</span>
+                                                            <span class="context-item-name">{attr.name}</span>
+                                                        </div>
+                                                        <template if:true={attr.hasDomain}>
+                                                            <div class="context-domain">= [{attr.domainStr}]</div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- F-01: User Variables -->
+                                    <template if:true={hasContextVariables}>
+                                        <div class="context-section">
+                                            <div class="context-section-header">
+                                                <span class="context-section-label">Variables</span>
+                                            </div>
+                                            <div class="context-items">
+                                                <template for:each={formattedContextVariables} for:item="cvar">
+                                                    <div key={cvar.id} class="context-attr-row">
+                                                        <div class="context-item">
+                                                            <span class="context-item-type">{cvar.dataType}</span>
+                                                            <span class="context-item-name">{cvar.name}</span>
+                                                            <span class="context-item-badge variable">var</span>
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- Bundle Hierarchy -->
+                                    <template if:true={hasBundleTree}>
+                                        <div class="context-section">
+                                            <div class="context-section-header">
+                                                <span class="context-section-label">Bundle Hierarchy</span>
+                                            </div>
+                                            <div class="context-items">
+                                                <template for:each={formattedBundleTree} for:item="node">
+                                                    <div key={node.id}>
+                                                        <template if:true={node.isGroup}>
+                                                            <div class="context-item context-group" style={node.indentStyle}>
+                                                                <span class="context-item-name context-group-name">{node.name}</span>
+                                                                <span class="context-item-badge relation">[0..{node.maxQty}]</span>
+                                                            </div>
+                                                        </template>
+                                                        <template if:false={node.isGroup}>
+                                                            <div class="context-item" style={node.indentStyle}>
+                                                                <span class="context-item-name">{node.name}</span>
+                                                                <template if:true={node.isBundle}>
+                                                                    <span class="context-item-badge bundle">Bundle</span>
+                                                                </template>
+                                                            </div>
+                                                            <template if:true={node.hasAttributes}>
+                                                                <template for:each={node.formattedAttributes} for:item="attr">
+                                                                    <div key={attr.name} class="context-attr-row" style={node.indentStyle}>
+                                                                        <div class="context-item context-child-attr">
+                                                                            <span class="context-item-type">{attr.dataType}</span>
+                                                                            <span class="context-item-name">{attr.name}</span>
+                                                                        </div>
+                                                                        <template if:true={attr.hasDomain}>
+                                                                            <div class="context-domain" style={node.indentStyle}>= [{attr.domainStr}]</div>
+                                                                        </template>
+                                                                    </div>
+                                                                </template>
+                                                            </template>
+                                                            <!-- F-01: Child product variables in context -->
+                                                            <template if:true={node.hasVariables}>
+                                                                <template for:each={node.formattedVariables} for:item="nvar">
+                                                                    <div key={nvar.id} class="context-attr-row" style={node.indentStyle}>
+                                                                        <div class="context-item context-child-attr">
+                                                                            <span class="context-item-type">{nvar.dataType}</span>
+                                                                            <span class="context-item-name">{nvar.name}</span>
+                                                                            <span class="context-item-badge variable">var</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </template>
+                                                            </template>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
                                         </div>
                                     </template>
                                 </div>
                             </template>
                         </div>
                     </template>
-                </div>
-            </div>
-            
-            <!-- Right Pane: Editor -->
-            <div class="right-pane">
-                <template if:true={hasSelectedSnippet}>
-                    <div class="editor-container">
-                        <!-- Header with Label, Active Toggle, and Save Button -->
-                        <div class="editor-header">
-                            <lightning-input
-                                type="text"
-                                label="Label"
-                                variant="label-hidden"
-                                value={editLabel}
-                                onchange={handleLabelChange}
-                                placeholder="Enter label..."
-                                class="label-input">
-                            </lightning-input>
-                            <div class="active-toggle-container">
-                                <span class="toggle-label">Active</span>
-                                <lightning-input
-                                    type="toggle"
-                                    label="Active"
-                                    variant="label-hidden"
-                                    checked={isActive}
-                                    onchange={handleActiveToggle}
-                                    class="active-toggle">
-                                </lightning-input>
-                            </div>
-                            <lightning-button
-                                label="Save"
-                                variant="brand"
-                                onclick={handleSave}
-                                disabled={isSaving}
-                                class="save-button">
-                            </lightning-button>
-                        </div>
-                        
-                        <!-- CML Toggle -->
-                        <div class="toggle-container">
-                            <div class="toggle-wrapper">
-                                <span class="toggle-label">CML</span>
-                                <lightning-input
-                                    type="toggle"
-                                    label="CML"
-                                    variant="label-hidden"
-                                    checked={showCMLEditor}
-                                    onchange={handleToggleCML}
-                                    class="cml-toggle">
-                                </lightning-input>
-                            </div>
-                        </div>
-                        
-                        <!-- Visual Editor (when toggle is OFF) -->
-                        <template if:false={showCMLEditor}>
-                            <div class="visual-editor">
-                                <div class="visual-section">
-                                    <div class="visual-header">
-                                        <span class="visual-badge">WHEN</span>
-                                        <lightning-icon 
-                                            icon-name="utility:chevrondown"
-                                            size="x-small">
-                                        </lightning-icon>
+                </template>
+
+                <!-- ===== ATTRIBUTES TAB: Right Pane ===== -->
+                <template if:true={isAttributesTab}>
+                    <template if:true={hasSelectedAttrItem}>
+                        <div class="editor-container">
+                            <!-- Attr Editor Header -->
+                            <div class="editor-header">
+                                <template if:true={selectedAttrIsVar}>
+                                    <lightning-input
+                                        type="text"
+                                        label="Name"
+                                        variant="label-hidden"
+                                        value={editAttrName}
+                                        onchange={handleAttrNameChange}
+                                        placeholder="Variable name..."
+                                        class="label-input">
+                                    </lightning-input>
+                                </template>
+                                <template if:false={selectedAttrIsVar}>
+                                    <div class="label-input attr-name-readonly">
+                                        <span class="attr-name-text">{selectedAttrItem.name}</span>
+                                        <span class={selectedAttrItem.badgeClass}>{selectedAttrItem.badge}</span>
                                     </div>
-                                    <div class="visual-content">
-                                        <div class="visual-row">
-                                            <div class="visual-field">
-                                                <label class="visual-label">* Element</label>
-                                                <lightning-combobox
-                                                    label="Element"
-                                                    variant="label-hidden"
-                                                    placeholder="Select Transaction Header"
-                                                    class="visual-input"
-                                                    disabled>
-                                                </lightning-combobox>
-                                            </div>
-                                            <div class="visual-field">
-                                                <label class="visual-label">Operator</label>
-                                                <lightning-combobox
-                                                    label="Operator"
-                                                    variant="label-hidden"
-                                                    placeholder="Is Not Equals"
-                                                    class="visual-input"
-                                                    disabled>
-                                                </lightning-combobox>
-                                            </div>
-                                            <div class="visual-field">
-                                                <label class="visual-label">* Element</label>
+                                </template>
+                                <lightning-button
+                                    label="Save"
+                                    variant="brand"
+                                    onclick={handleSaveAttr}
+                                    disabled={isSavingAttr}
+                                    class="save-button">
+                                </lightning-button>
+                            </div>
+
+                            <!-- Attribute Details -->
+                            <div class="attr-details">
+                                <div class="attr-detail-row">
+                                    <span class="attr-detail-label">Data Type</span>
+                                    <template if:true={selectedAttrIsVar}>
+                                        <lightning-combobox
+                                            label="Data Type"
+                                            variant="label-hidden"
+                                            value={editAttrType}
+                                            options={dataTypeOptions}
+                                            onchange={handleAttrTypeChange}
+                                            class="attr-detail-value">
+                                        </lightning-combobox>
+                                    </template>
+                                    <template if:false={selectedAttrIsVar}>
+                                        <span class="attr-detail-value-text">{selectedAttrItem.dataType}</span>
+                                    </template>
+                                </div>
+                                <template if:true={selectedAttrHasDomain}>
+                                    <div class="attr-detail-row">
+                                        <span class="attr-detail-label">Domain</span>
+                                        <span class="attr-detail-value-text attr-domain-text">= [{selectedAttrDomainStr}]</span>
+                                    </div>
+                                </template>
+                                <template if:true={selectedAttrIsVar}>
+                                    <div class="attr-detail-row">
+                                        <span class="attr-detail-label">Domain Values</span>
+                                        <lightning-input
+                                            type="text"
+                                            label="Domain"
+                                            variant="label-hidden"
+                                            value={editAttrDomain}
+                                            onchange={handleAttrDomainChange}
+                                            placeholder='"value1", "value2"'
+                                            class="attr-detail-value">
+                                        </lightning-input>
+                                    </div>
+                                </template>
+                                <template if:true={selectedAttrIsVar}>
+                                    <div class="attr-detail-row">
+                                        <span class="attr-detail-label">Default Value</span>
+                                        <lightning-input
+                                            type="text"
+                                            label="Default Value"
+                                            variant="label-hidden"
+                                            value={editAttrDefaultValue}
+                                            onchange={handleAttrDefaultValueChange}
+                                            placeholder="Enter default value..."
+                                            class="attr-detail-value">
+                                        </lightning-input>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <!-- Attr Annotations Editor -->
+                            <div class="annotations-section">
+                                <div class="annotations-header">
+                                    <span class="annotations-title">Annotations</span>
+                                    <lightning-button-icon
+                                        icon-name="utility:add"
+                                        variant="bare"
+                                        alternative-text="Add Annotation"
+                                        title="Add Annotation"
+                                        onclick={handleAddAttrAnnotation}
+                                        class="add-annotation-button">
+                                    </lightning-button-icon>
+                                </div>
+                                <div class="annotations-list">
+                                    <template if:true={hasAttrAnnotations}>
+                                        <template for:each={attrAnnotations} for:item="aann">
+                                            <div key={aann.id} class="annotation-item">
                                                 <lightning-input
                                                     type="text"
-                                                    label="Element"
+                                                    label="Key"
                                                     variant="label-hidden"
-                                                    placeholder="Value = US"
-                                                    class="visual-input"
-                                                    disabled>
+                                                    value={aann.type}
+                                                    placeholder="Key (e.g., defaultValue)"
+                                                    data-id={aann.id}
+                                                    onchange={handleAttrAnnotationTypeChange}
+                                                    class="annotation-type">
                                                 </lightning-input>
+                                                <lightning-input
+                                                    type="text"
+                                                    label="Value"
+                                                    variant="label-hidden"
+                                                    value={aann.value}
+                                                    placeholder="Value"
+                                                    data-id={aann.id}
+                                                    onchange={handleAttrAnnotationValueChange}
+                                                    class="annotation-value">
+                                                </lightning-input>
+                                                <lightning-button-icon
+                                                    icon-name="utility:delete"
+                                                    variant="bare"
+                                                    alternative-text="Delete"
+                                                    title="Delete"
+                                                    data-id={aann.id}
+                                                    onclick={handleDeleteAttrAnnotation}
+                                                    class="delete-annotation-button">
+                                                </lightning-button-icon>
                                             </div>
-                                        </div>
-                                        <div class="visual-info">
-                                            <lightning-icon 
-                                                icon-name="utility:info"
-                                                size="x-small">
-                                            </lightning-icon>
-                                            <span class="visual-info-text">
-                                                * Grouping Logic: 1
-                                            </span>
-                                        </div>
-                                        <div class="visual-description">
-                                            Group expressions within '()' and connect the groups using 'and', 'or', or 'xor' logic. When the logic contains mixed operators, always group expressions by using '()' to define the exact evaluation order.
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="visual-section">
-                                    <div class="visual-header">
-                                        <span class="visual-badge">DISPLAY</span>
-                                    </div>
-                                    <div class="visual-content">
-                                        <div class="visual-field">
-                                            <label class="visual-label">Message Type</label>
-                                            <lightning-combobox
-                                                label="Message Type"
-                                                variant="label-hidden"
-                                                placeholder="Informational"
-                                                class="visual-input"
-                                                disabled>
-                                            </lightning-combobox>
-                                        </div>
-                                        <div class="visual-field">
-                                            <label class="visual-label">* Run-time Message</label>
-                                            <lightning-input
-                                                type="text"
-                                                label="Run-time Message"
-                                                variant="label-hidden"
-                                                placeholder="Not in US"
-                                                class="visual-input"
-                                                disabled>
-                                            </lightning-input>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
-                        
-                        <!-- Code Editor (when toggle is ON) -->
-                        <template if:true={showCMLEditor}>
-                            <div class="code-editor">
-                    <c-cml-code-editor
-                        value={editCML}
-                        attribute-definitions={attributeDefinitions}
-                        onchange={handleCMLChange}
-                        onrequestcontext={handleContextRequest}
-                        onrequestpicklist={handlePicklistRequest}>
-                    </c-cml-code-editor>
-                            </div>
-                        </template>
-                        
-                        <!-- Annotations Section -->
-                        <div class="annotations-section">
-                            <div class="annotations-header">
-                                <span class="annotations-title">Annotations</span>
-                                <lightning-button-icon
-                                    icon-name="utility:add"
-                                    variant="bare"
-                                    alternative-text="Add Annotation"
-                                    title="Add Annotation"
-                                    onclick={handleAddAnnotation}
-                                    class="add-annotation-button">
-                                </lightning-button-icon>
-                            </div>
-                            <div class="annotations-list">
-                                <template if:true={hasAnnotations}>
-                                    <template for:each={annotations} for:item="annotation">
-                                        <div key={annotation.id} class="annotation-item">
-                                            <lightning-input
-                                                type="text"
-                                                label="Key"
-                                                variant="label-hidden"
-                                                value={annotation.type}
-                                                placeholder="Key (e.g., startDate)"
-                                                data-id={annotation.id}
-                                                onchange={handleAnnotationTypeChange}
-                                                class="annotation-type">
-                                            </lightning-input>
-                                            <lightning-input
-                                                type="text"
-                                                label="Value"
-                                                variant="label-hidden"
-                                                value={annotation.value}
-                                                placeholder="Value"
-                                                data-id={annotation.id}
-                                                onchange={handleAnnotationValueChange}
-                                                class="annotation-value">
-                                            </lightning-input>
-                                            <lightning-button-icon
-                                                icon-name="utility:delete"
-                                                variant="bare"
-                                                alternative-text="Delete"
-                                                title="Delete"
-                                                data-id={annotation.id}
-                                                onclick={handleDeleteAnnotation}
-                                                class="delete-annotation-button">
-                                            </lightning-button-icon>
-                                        </div>
+                                        </template>
                                     </template>
-                                </template>
-                                <template if:false={hasAnnotations}>
-                                    <div class="no-annotations">
-                                        No annotations
-                                    </div>
-                                </template>
+                                    <template if:false={hasAttrAnnotations}>
+                                        <div class="no-annotations">No annotations</div>
+                                    </template>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </template>
-                
-                <template if:false={hasSelectedSnippet}>
-                    <div class="placeholder">
-                        <div class="placeholder-content">
-                            <lightning-icon 
-                                icon-name="utility:text"
-                                size="large"
-                                class="placeholder-icon">
-                            </lightning-icon>
-                            <p class="placeholder-text">Select a snippet to edit or create a new one</p>
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Available Context Panel -->
-                <template if:true={hasProductContext}>
-                    <div class="context-panel">
-                        <div class="context-header" onclick={handleContextToggle}>
-                            <lightning-icon
-                                icon-name={contextToggleIcon}
-                                size="x-small"
-                                class="context-toggle-icon">
-                            </lightning-icon>
-                            <span class="context-title">Available Context</span>
-                        </div>
-                        <template if:true={contextExpanded}>
-                            <div class="context-body">
-                                <!-- Classification Attributes (inherited) -->
-                                <template if:true={hasClassificationAttributes}>
-                                    <div class="context-section">
-                                        <div class="context-section-header">
-                                            <span class="context-section-label">Classification: {productContext.classificationName}</span>
-                                        </div>
-                                        <div class="context-items">
-                                            <template for:each={formattedClassificationAttributes} for:item="attr">
-                                                <div key={attr.name} class="context-attr-row">
-                                                    <div class="context-item">
-                                                        <span class="context-item-type">{attr.dataType}</span>
-                                                        <span class="context-item-name">{attr.name}</span>
-                                                        <span class="context-item-badge inherited">Inherited</span>
-                                                    </div>
-                                                    <template if:true={attr.hasDomain}>
-                                                        <div class="context-domain">= [{attr.domainStr}]</div>
-                                                    </template>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </div>
-                                </template>
-
-                                <!-- Product Attributes -->
-                                <template if:true={hasProductAttributes}>
-                                    <div class="context-section">
-                                        <div class="context-section-header">
-                                            <span class="context-section-label">Product Attributes</span>
-                                        </div>
-                                        <div class="context-items">
-                                            <template for:each={formattedProductAttributes} for:item="attr">
-                                                <div key={attr.name} class="context-attr-row">
-                                                    <div class="context-item">
-                                                        <span class="context-item-type">{attr.dataType}</span>
-                                                        <span class="context-item-name">{attr.name}</span>
-                                                    </div>
-                                                    <template if:true={attr.hasDomain}>
-                                                        <div class="context-domain">= [{attr.domainStr}]</div>
-                                                    </template>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </div>
-                                </template>
-
-                                <!-- Bundle Hierarchy -->
-                                <template if:true={hasBundleTree}>
-                                    <div class="context-section">
-                                        <div class="context-section-header">
-                                            <span class="context-section-label">Bundle Hierarchy</span>
-                                        </div>
-                                        <div class="context-items">
-                                            <template for:each={formattedBundleTree} for:item="node">
-                                                <div key={node.id}>
-                                                    <!-- Group node -->
-                                                    <template if:true={node.isGroup}>
-                                                        <div class="context-item context-group" style={node.indentStyle}>
-                                                            <span class="context-item-name context-group-name">{node.name}</span>
-                                                            <span class="context-item-badge relation">[0..{node.maxQty}]</span>
-                                                        </div>
-                                                    </template>
-                                                    <!-- Product / Bundle node -->
-                                                    <template if:false={node.isGroup}>
-                                                        <div class="context-item" style={node.indentStyle}>
-                                                            <span class="context-item-name">{node.name}</span>
-                                                            <template if:true={node.isBundle}>
-                                                                <span class="context-item-badge bundle">Bundle</span>
-                                                            </template>
-                                                        </div>
-                                                        <!-- Child product attributes -->
-                                                        <template if:true={node.hasAttributes}>
-                                                            <template for:each={node.formattedAttributes} for:item="attr">
-                                                                <div key={attr.name} class="context-attr-row" style={node.indentStyle}>
-                                                                    <div class="context-item context-child-attr">
-                                                                        <span class="context-item-type">{attr.dataType}</span>
-                                                                        <span class="context-item-name">{attr.name}</span>
-                                                                    </div>
-                                                                    <template if:true={attr.hasDomain}>
-                                                                        <div class="context-domain" style={node.indentStyle}>= [{attr.domainStr}]</div>
-                                                                    </template>
-                                                                </div>
-                                                            </template>
-                                                        </template>
-                                                    </template>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </div>
-                                </template>
+                    </template>
+                    <template if:false={hasSelectedAttrItem}>
+                        <div class="placeholder">
+                            <div class="placeholder-content">
+                                <lightning-icon icon-name="utility:settings" size="large" class="placeholder-icon"></lightning-icon>
+                                <p class="placeholder-text">Select an attribute or variable to edit annotations</p>
                             </div>
-                        </template>
-                    </div>
+                        </div>
+                    </template>
                 </template>
             </div>
         </div>

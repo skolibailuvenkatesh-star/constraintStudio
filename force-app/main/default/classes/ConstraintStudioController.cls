@@ -248,6 +248,8 @@ public with sharing class ConstraintStudioController {
             List<Map<String, Object>> classificationAttributes = new List<Map<String, Object>>();
             List<Map<String, Object>> bundleTree = new List<Map<String, Object>>();
             String classificationName = '';
+            List<Map<String, Object>> variables = new List<Map<String, Object>>();
+            List<Map<String, Object>> annotSnippets = new List<Map<String, Object>>();
 
             if (objectApiName == 'Product2') {
                 Product2 product = [SELECT Id, Name, BasedOnId, BasedOn.Name FROM Product2 WHERE Id = :recordId LIMIT 1];
@@ -264,6 +266,55 @@ public with sharing class ConstraintStudioController {
                 // Recursive bundle hierarchy (flat tree with depth)
                 buildBundleTree(recordId, 0, bundleTree, new Set<Id>());
 
+                // F-01: Load variables across bundle hierarchy
+                Set<Id> allTreeProductIds = new Set<Id>();
+                allTreeProductIds.add(Id.valueOf(recordId));
+                for (Map<String, Object> node : bundleTree) {
+                    if (node.get('nodeType') != 'group') {
+                        allTreeProductIds.add((Id)node.get('id'));
+                    }
+                }
+                Map<Id, List<Map<String, Object>>> varsByProduct = new Map<Id, List<Map<String, Object>>>();
+                for (CMLSnippet__c v : [
+                    SELECT Id, Label__c, CML__c, ParentProduct2__c
+                    FROM CMLSnippet__c
+                    WHERE Type__c = 'variable' AND ParentProduct2__c IN :allTreeProductIds
+                    ORDER BY Label__c ASC
+                ]) {
+                    Map<String, Object> vm = new Map<String, Object>{
+                        'id' => v.Id, 'name' => v.Label__c, 'cml' => v.CML__c
+                    };
+                    if (!varsByProduct.containsKey(v.ParentProduct2__c)) {
+                        varsByProduct.put(v.ParentProduct2__c, new List<Map<String, Object>>());
+                    }
+                    varsByProduct.get(v.ParentProduct2__c).add(vm);
+                }
+                variables = varsByProduct.containsKey(Id.valueOf(recordId))
+                    ? varsByProduct.get(Id.valueOf(recordId))
+                    : new List<Map<String, Object>>();
+
+                // Inject variables into bundle tree nodes
+                for (Map<String, Object> node : bundleTree) {
+                    if (node.get('nodeType') != 'group') {
+                        Id nid = (Id)node.get('id');
+                        if (varsByProduct.containsKey(nid)) {
+                            node.put('variables', varsByProduct.get(nid));
+                        }
+                    }
+                }
+
+                // F-01: Annotation snippets for current product
+                for (CMLSnippet__c ann : [
+                    SELECT Id, Label__c, CML__c
+                    FROM CMLSnippet__c
+                    WHERE Type__c = 'annotation' AND ParentProduct2__c = :recordId
+                    ORDER BY Label__c ASC
+                ]) {
+                    annotSnippets.add(new Map<String, Object>{
+                        'id' => ann.Id, 'name' => ann.Label__c, 'cml' => ann.CML__c
+                    });
+                }
+
             } else if (objectApiName == 'ProductClassification') {
                 classificationName = [SELECT Name FROM ProductClassification WHERE Id = :recordId LIMIT 1].Name;
                 classificationAttributes = fetchAttributesForClassification(Id.valueOf(recordId));
@@ -273,7 +324,9 @@ public with sharing class ConstraintStudioController {
                 'productAttributes' => productAttributes,
                 'classificationAttributes' => classificationAttributes,
                 'classificationName' => classificationName,
-                'bundleTree' => bundleTree
+                'bundleTree' => bundleTree,
+                'variables' => variables,
+                'annotationSnippets' => annotSnippets
             };
         } catch (Exception e) {
             throw new AuraHandledException('Error fetching product context: ' + e.getMessage());
@@ -765,6 +818,79 @@ public with sharing class ConstraintStudioController {
             
         } catch (Exception e) {
             throw new AuraHandledException('Error fetching contextual products: ' + e.getMessage());
+        }
+    }
+
+    // ==================== F-01: Variable & Annotation CRUD ====================
+
+    @AuraEnabled
+    public static CMLSnippet__c saveVariableSnippet(String recordId, String objectApiName, String snippetId,
+            String varName, String varType, String domainValues, String defaultValue, String annotationCml) {
+        try {
+            String cml = '';
+            if (String.isNotBlank(annotationCml)) {
+                cml += annotationCml + '\n';
+            }
+            cml += varType + ' ' + varName;
+            if (String.isNotBlank(defaultValue)) {
+                Boolean needsQuotes = varType == 'string' || varType == 'date';
+                cml += needsQuotes ? ' = "' + defaultValue + '"' : ' = ' + defaultValue;
+            } else if (String.isNotBlank(domainValues)) {
+                cml += ' = [' + domainValues + ']';
+            }
+            cml += ';';
+
+            CMLSnippet__c snippet;
+            if (String.isNotBlank(snippetId)) {
+                snippet = [SELECT Id FROM CMLSnippet__c WHERE Id = :snippetId LIMIT 1];
+                snippet.Label__c = varName;
+                snippet.CML__c = cml;
+                update snippet;
+            } else {
+                snippet = new CMLSnippet__c();
+                snippet.Label__c = varName;
+                snippet.CML__c = cml;
+                snippet.Type__c = 'variable';
+                snippet.Object__c = objectApiName;
+                if (objectApiName == 'Product2') {
+                    snippet.ParentProduct2__c = recordId;
+                } else if (objectApiName == 'ProductClassification') {
+                    snippet.ParentProductClassification__c = recordId;
+                }
+                insert snippet;
+            }
+            return [SELECT Id, Name, Label__c, CML__c, Type__c FROM CMLSnippet__c WHERE Id = :snippet.Id LIMIT 1];
+        } catch (Exception e) {
+            throw new AuraHandledException('Error saving variable: ' + e.getMessage());
+        }
+    }
+
+    @AuraEnabled
+    public static CMLSnippet__c saveAnnotationSnippet(String recordId, String objectApiName, String snippetId,
+            String attributeName, String annotationCml) {
+        try {
+            CMLSnippet__c snippet;
+            if (String.isNotBlank(snippetId)) {
+                snippet = [SELECT Id FROM CMLSnippet__c WHERE Id = :snippetId LIMIT 1];
+                snippet.Label__c = attributeName;
+                snippet.CML__c = annotationCml;
+                update snippet;
+            } else {
+                snippet = new CMLSnippet__c();
+                snippet.Label__c = attributeName;
+                snippet.CML__c = annotationCml;
+                snippet.Type__c = 'annotation';
+                snippet.Object__c = objectApiName;
+                if (objectApiName == 'Product2') {
+                    snippet.ParentProduct2__c = recordId;
+                } else if (objectApiName == 'ProductClassification') {
+                    snippet.ParentProductClassification__c = recordId;
+                }
+                insert snippet;
+            }
+            return [SELECT Id, Name, Label__c, CML__c, Type__c FROM CMLSnippet__c WHERE Id = :snippet.Id LIMIT 1];
+        } catch (Exception e) {
+            throw new AuraHandledException('Error saving annotation: ' + e.getMessage());
         }
     }
 
