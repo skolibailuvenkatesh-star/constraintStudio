@@ -3,17 +3,42 @@
         <div class="studio-container">
             <!-- Left Pane: Explorer -->
             <div class="left-pane">
-                <!-- Search Bar -->
+                <!-- Search Bar + Import -->
                 <div class="search-container">
                     <lightning-input
                         type="search"
+                        label="Search"
+                        variant="label-hidden"
                         placeholder="Search..."
                         value={searchTerm}
                         onchange={handleSearchChange}
                         class="search-input">
                     </lightning-input>
                 </div>
-                
+
+                <!-- Global Properties -->
+                <div class="global-properties-container">
+                    <div class="global-properties-header">
+                        <span class="global-properties-title">Global Properties</span>
+                        <lightning-button-icon
+                            icon-name="utility:save"
+                            variant="bare"
+                            alternative-text="Save"
+                            title="Save Global Properties"
+                            onclick={handleGlobalPropertiesSave}
+                            class="global-save-button">
+                        </lightning-button-icon>
+                    </div>
+                    <lightning-textarea
+                        label="Global Properties"
+                        variant="label-hidden"
+                        value={globalProperties}
+                        placeholder="extern string Country;&#10;property key = &quot;value&quot;;"
+                        onchange={handleGlobalPropertiesChange}
+                        class="global-properties-input">
+                    </lightning-textarea>
+                </div>
+
                 <!-- Sections -->
                 <div class="sections-container">
                     <template for:each={sections} for:item="section">
@@ -109,6 +134,8 @@
                         <div class="editor-header">
                             <lightning-input
                                 type="text"
+                                label="Label"
+                                variant="label-hidden"
                                 value={editLabel}
                                 onchange={handleLabelChange}
                                 placeholder="Enter label..."
@@ -118,6 +145,8 @@
                                 <span class="toggle-label">Active</span>
                                 <lightning-input
                                     type="toggle"
+                                    label="Active"
+                                    variant="label-hidden"
                                     checked={isActive}
                                     onchange={handleActiveToggle}
                                     class="active-toggle">
@@ -138,6 +167,8 @@
                                 <span class="toggle-label">CML</span>
                                 <lightning-input
                                     type="toggle"
+                                    label="CML"
+                                    variant="label-hidden"
                                     checked={showCMLEditor}
                                     onchange={handleToggleCML}
                                     class="cml-toggle">
@@ -161,6 +192,8 @@
                                             <div class="visual-field">
                                                 <label class="visual-label">* Element</label>
                                                 <lightning-combobox
+                                                    label="Element"
+                                                    variant="label-hidden"
                                                     placeholder="Select Transaction Header"
                                                     class="visual-input"
                                                     disabled>
@@ -169,6 +202,8 @@
                                             <div class="visual-field">
                                                 <label class="visual-label">Operator</label>
                                                 <lightning-combobox
+                                                    label="Operator"
+                                                    variant="label-hidden"
                                                     placeholder="Is Not Equals"
                                                     class="visual-input"
                                                     disabled>
@@ -178,6 +213,8 @@
                                                 <label class="visual-label">* Element</label>
                                                 <lightning-input
                                                     type="text"
+                                                    label="Element"
+                                                    variant="label-hidden"
                                                     placeholder="Value = US"
                                                     class="visual-input"
                                                     disabled>
@@ -207,6 +244,8 @@
                                         <div class="visual-field">
                                             <label class="visual-label">Message Type</label>
                                             <lightning-combobox
+                                                label="Message Type"
+                                                variant="label-hidden"
                                                 placeholder="Informational"
                                                 class="visual-input"
                                                 disabled>
@@ -216,6 +255,8 @@
                                             <label class="visual-label">* Run-time Message</label>
                                             <lightning-input
                                                 type="text"
+                                                label="Run-time Message"
+                                                variant="label-hidden"
                                                 placeholder="Not in US"
                                                 class="visual-input"
                                                 disabled>
@@ -256,18 +297,22 @@
                                 <template if:true={hasAnnotations}>
                                     <template for:each={annotations} for:item="annotation">
                                         <div key={annotation.id} class="annotation-item">
-                                            <lightning-combobox
-                                                name="annotationType"
+                                            <lightning-input
+                                                type="text"
+                                                label="Key"
+                                                variant="label-hidden"
                                                 value={annotation.type}
-                                                placeholder="Select Type"
-                                                options={annotationTypeOptions}
+                                                placeholder="Key (e.g., startDate)"
                                                 data-id={annotation.id}
                                                 onchange={handleAnnotationTypeChange}
                                                 class="annotation-type">
-                                            </lightning-combobox>
+                                            </lightning-input>
                                             <lightning-input
-                                                type="date"
+                                                type="text"
+                                                label="Value"
+                                                variant="label-hidden"
                                                 value={annotation.value}
+                                                placeholder="Value"
                                                 data-id={annotation.id}
                                                 onchange={handleAnnotationValueChange}
                                                 class="annotation-value">

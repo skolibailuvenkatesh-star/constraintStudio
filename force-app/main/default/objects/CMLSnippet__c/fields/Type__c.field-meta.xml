@@ -26,6 +26,11 @@
                 <default>false</default>
                 <label>constraint</label>
             </value>
+            <value>
+                <fullName>global</fullName>
+                <default>false</default>
+                <label>global</label>
+            </value>
         </valueSetDefinition>
     </valueSet>
 </CustomField>

@@ -202,11 +202,11 @@ public with sharing class ConstraintStudioController {
         try {
             CMLSnippet__c snippet = new CMLSnippet__c();
             snippet.Label__c = label;
-            snippet.Type__c = 'constraint';
+            snippet.Type__c = keyword == 'global' ? 'global' : 'constraint';
             snippet.Object__c = objectApiName;
-            
+
             // Set the default CML based on keyword
-            snippet.CML__c = keyword + '();';
+            snippet.CML__c = keyword == 'global' ? '' : keyword + '();';
             
             // Set the parent lookup based on object type
             if (objectApiName == 'Product2') {
@@ -224,6 +224,23 @@ public with sharing class ConstraintStudioController {
         }
     }
     
+    @AuraEnabled
+    public static CMLSnippet__c getGlobalSnippet(String recordId, String objectApiName) {
+        try {
+            String query = 'SELECT Id, Name, Label__c, CML__c, Type__c FROM CMLSnippet__c WHERE Type__c = \'global\'';
+            if (objectApiName == 'Product2') {
+                query += ' AND ParentProduct2__c = :recordId';
+            } else if (objectApiName == 'ProductClassification') {
+                query += ' AND ParentProductClassification__c = :recordId';
+            }
+            query += ' LIMIT 1';
+            List<CMLSnippet__c> results = Database.query(query);
+            return results.isEmpty() ? null : results[0];
+        } catch (Exception e) {
+            throw new AuraHandledException('Error fetching global snippet: ' + e.getMessage());
+        }
+    }
+
     @AuraEnabled(cacheable=true)
     public static List<Map<String, String>> getAttributeDefinitions(String recordId, String objectApiName) {
         try {
@@ -521,6 +538,118 @@ public with sharing class ConstraintStudioController {
             
         } catch (Exception e) {
             throw new AuraHandledException('Error fetching contextual products: ' + e.getMessage());
+        }
+    }
+
+    /**
+     * @description Imports default-included products from a bundle's ProductComponentGroups
+     * and creates initial CML snippets. Only includes components where IsDefault=true.
+     * @param recordId The parent Product2 (bundle) ID
+     * @return List<CMLSnippet__c> The created snippets
+     */
+    @AuraEnabled
+    public static List<CMLSnippet__c> importBundleProducts(String recordId) {
+        try {
+            // Get all ProductComponentGroups for this bundle
+            List<ProductComponentGroup> pcgList = [
+                SELECT Id, Name, MinBundleComponents, MaxBundleComponents
+                FROM ProductComponentGroup
+                WHERE ParentProductId = :recordId
+                ORDER BY Name ASC
+            ];
+
+            if (pcgList.isEmpty()) {
+                throw new AuraHandledException('No ProductComponentGroups found for this product bundle.');
+            }
+
+            Set<Id> pcgIds = new Set<Id>();
+            for (ProductComponentGroup pcg : pcgList) {
+                pcgIds.add(pcg.Id);
+            }
+
+            // Only get default-included components
+            List<ProductRelatedComponent> prcList = [
+                SELECT Id, ProductComponentGroupId, ProductComponentGroup.Name,
+                       ChildProductId, ChildProduct.Name, ChildProduct.BasedOnId,
+                       MinQuantity, MaxQuantity
+                FROM ProductRelatedComponent
+                WHERE ProductComponentGroupId IN :pcgIds
+                AND IsDefaultComponent = true
+                ORDER BY ProductComponentGroup.Name, ChildProduct.Name
+            ];
+
+            // Group PRCs by PCG
+            Map<Id, List<ProductRelatedComponent>> prcByPcg = new Map<Id, List<ProductRelatedComponent>>();
+            for (ProductRelatedComponent prc : prcList) {
+                if (!prcByPcg.containsKey(prc.ProductComponentGroupId)) {
+                    prcByPcg.put(prc.ProductComponentGroupId, new List<ProductRelatedComponent>());
+                }
+                prcByPcg.get(prc.ProductComponentGroupId).add(prc);
+            }
+
+            // Check existing snippets to avoid duplicates
+            List<CMLSnippet__c> existingSnippets = [
+                SELECT Id, Label__c
+                FROM CMLSnippet__c
+                WHERE ParentProduct2__c = :recordId
+                AND Type__c = 'constraint'
+            ];
+            Set<String> existingLabels = new Set<String>();
+            for (CMLSnippet__c s : existingSnippets) {
+                if (s.Label__c != null) existingLabels.add(s.Label__c);
+            }
+
+            // Create a CML snippet for each group with default products
+            List<CMLSnippet__c> newSnippets = new List<CMLSnippet__c>();
+
+            for (ProductComponentGroup pcg : pcgList) {
+                List<ProductRelatedComponent> prcs = prcByPcg.get(pcg.Id);
+                if (prcs == null || prcs.isEmpty()) continue;
+
+                String groupCleanName = pcg.Name.replaceAll('[^a-zA-Z0-9]', '_');
+
+                // Skip if snippet with this label already exists
+                if (existingLabels.contains(groupCleanName)) continue;
+
+                // Build CML with default product references
+                String cml = '// Group: ' + pcg.Name;
+                if (pcg.MinBundleComponents != null || pcg.MaxBundleComponents != null) {
+                    cml += ' [' + (pcg.MinBundleComponents != null ? pcg.MinBundleComponents : 0)
+                         + '..' + (pcg.MaxBundleComponents != null ? String.valueOf(pcg.MaxBundleComponents) : '*') + ']';
+                }
+                cml += '\n';
+
+                for (ProductRelatedComponent prc : prcs) {
+                    String productCleanName = prc.ChildProduct.Name.replaceAll('[^a-zA-Z0-9]', '_');
+                    cml += 'constraint(' + groupCleanName + '[' + productCleanName + ']);\n';
+                }
+
+                CMLSnippet__c snippet = new CMLSnippet__c();
+                snippet.Label__c = groupCleanName;
+                snippet.CML__c = cml;
+                snippet.Type__c = 'constraint';
+                snippet.Object__c = 'Product2';
+                snippet.ParentProduct2__c = recordId;
+                newSnippets.add(snippet);
+            }
+
+            if (!newSnippets.isEmpty()) {
+                insert newSnippets;
+            }
+
+            // Return all snippets
+            return [
+                SELECT Id, Name, Label__c, CML__c, Type__c
+                FROM CMLSnippet__c
+                WHERE ParentProduct2__c = :recordId
+                AND Type__c = 'constraint'
+                ORDER BY Label__c ASC NULLS LAST, Name ASC
+            ];
+
+        } catch (AuraHandledException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new AuraHandledException('Error importing bundle products: ' + e.getMessage());
         }
     }
 }

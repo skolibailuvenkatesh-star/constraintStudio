@@ -11,7 +11,7 @@ public class CMLGeneratorQueueable implements Queueable, Database.AllowsCallouts
     public void execute(QueueableContext context) {
         try {
             System.debug('=== CMLGeneratorQueueable Started ===');
-            String result = CMLGenerator.execute();
+            String result = CMLGeneratorV2.execute();
             System.debug('=== CMLGeneratorQueueable Completed ===');
             System.debug('Result: ' + result);
         } catch (Exception e) {

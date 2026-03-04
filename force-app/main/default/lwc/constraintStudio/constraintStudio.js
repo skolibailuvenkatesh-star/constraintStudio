@@ -10,6 +10,8 @@ import getProductComponentSuggestions from '@salesforce/apex/ConstraintStudioCon
 import getContextualProducts from '@salesforce/apex/ConstraintStudioController.getContextualProducts';
 import getPicklistValues from '@salesforce/apex/ConstraintStudioController.getPicklistValues';
 import findProductRelatedComponent from '@salesforce/apex/ConstraintStudioController.findProductRelatedComponent';
+import getGlobalSnippet from '@salesforce/apex/ConstraintStudioController.getGlobalSnippet';
+
 
 export default class ConstraintStudio extends LightningElement {
     @api recordId;
@@ -31,20 +33,18 @@ export default class ConstraintStudio extends LightningElement {
     @track isActive = true;
     @track showCMLEditor = false;
     @track isSaving = false;
+
     @track attributeDefinitions = [];
     @track productComponentSuggestions = [];
     @track idMappings = {}; // Store display name -> ID mappings
     @track annotations = []; // Store annotations
-    
+    @track globalProperties = ''; // Global properties (extern, property declarations)
+
     wiredSnippetsResult;
     allSuggestions = []; // Store all suggestions for reverse lookup
     annotationCounter = 0; // Counter for unique annotation IDs
+    globalSnippetId = null; // Track the global properties snippet record
     
-    // Annotation type options
-    annotationTypeOptions = [
-        { label: 'Start Date', value: 'startDate' },
-        { label: 'End Date', value: 'endDate' }
-    ];
     
     @wire(getAttributeDefinitions, {
         recordId: '$recordId',
@@ -192,6 +192,22 @@ export default class ConstraintStudio extends LightningElement {
     
     connectedCallback() {
         this.loadSnippets();
+        this.loadGlobalSnippet();
+    }
+
+    async loadGlobalSnippet() {
+        try {
+            const snippet = await getGlobalSnippet({
+                recordId: this.recordId,
+                objectApiName: this.objectApiName
+            });
+            if (snippet) {
+                this.globalSnippetId = snippet.Id;
+                this.globalProperties = snippet.CML__c || '';
+            }
+        } catch (error) {
+            console.error('Error loading global snippet:', error);
+        }
     }
     
     async loadSnippets() {
@@ -292,6 +308,7 @@ export default class ConstraintStudio extends LightningElement {
     get hasAnnotations() {
         return this.annotations && this.annotations.length > 0;
     }
+
     
     handleSearchChange(event) {
         this.searchTerm = event.target.value;
@@ -364,11 +381,9 @@ export default class ConstraintStudio extends LightningElement {
     }
     
     selectSnippet(snippet, isNewSnippet = false) {
-        console.log('selectSnippet called', snippet, 'isNewSnippet:', isNewSnippet);
-        console.log('snippet.CML__c:', snippet.CML__c);
         this.selectedSnippet = snippet;
         this.editLabel = snippet.Label__c || '';
-        
+
         // Parse the CML to extract active annotation and actual code
         const { isActive, cmlCode } = this.parseActiveAnnotation(snippet.CML__c || '');
         this.isActive = isActive;
@@ -387,52 +402,44 @@ export default class ConstraintStudio extends LightningElement {
     parseActiveAnnotation(cmlText) {
         if (!cmlText) {
             this.annotations = [];
-            return { isActive: true, cmlCode: '' }; // Default to active
+            return { isActive: true, cmlCode: '' };
         }
-        
-        // Check if CML starts with @(...) annotation
+
         const annotationMatch = cmlText.match(/^@\(([^)]+)\)\s*/);
-        
+
         if (annotationMatch) {
             const annotationContent = annotationMatch[1];
-            const cmlCode = cmlText.substring(annotationMatch[0].length); // Remove annotation
-            
-            // Parse individual annotations
+            const cmlCode = cmlText.substring(annotationMatch[0].length);
+
             let isActive = true;
             const parsedAnnotations = [];
-            
-            // Split by comma and parse each annotation
+
             const parts = annotationContent.split(',').map(p => p.trim());
-            
+
             parts.forEach(part => {
-                if (part.startsWith('active=')) {
-                    isActive = part.substring(7) === 'true';
-                } else if (part.startsWith('startDate=')) {
-                    let dateValue = part.substring(10);
-                    // Remove quotes if present
-                    dateValue = dateValue.replace(/^["']|["']$/g, '');
+                const eqIdx = part.indexOf('=');
+                if (eqIdx === -1) return;
+
+                const key = part.substring(0, eqIdx).trim();
+                let val = part.substring(eqIdx + 1).trim();
+                // Remove quotes if present
+                val = val.replace(/^["']|["']$/g, '');
+
+                if (key === 'active') {
+                    isActive = val === 'true';
+                } else {
                     parsedAnnotations.push({
                         id: `annotation-${this.annotationCounter++}`,
-                        type: 'startDate',
-                        value: this.convertToISODate(dateValue)
-                    });
-                } else if (part.startsWith('endDate=')) {
-                    let dateValue = part.substring(8);
-                    // Remove quotes if present
-                    dateValue = dateValue.replace(/^["']|["']$/g, '');
-                    parsedAnnotations.push({
-                        id: `annotation-${this.annotationCounter++}`,
-                        type: 'endDate',
-                        value: this.convertToISODate(dateValue)
+                        type: key,
+                        value: val
                     });
                 }
             });
-            
+
             this.annotations = parsedAnnotations;
             return { isActive, cmlCode };
         }
-        
-        // No annotation found - default to active
+
         this.annotations = [];
         return { isActive: true, cmlCode: cmlText };
     }
@@ -461,6 +468,38 @@ export default class ConstraintStudio extends LightningElement {
     
     handleActiveToggle(event) {
         this.isActive = event.target.checked;
+    }
+
+    handleGlobalPropertiesChange(event) {
+        this.globalProperties = event.target.value;
+    }
+
+    async handleGlobalPropertiesSave() {
+        try {
+            if (this.globalSnippetId) {
+                await saveCMLSnippet({
+                    snippetId: this.globalSnippetId,
+                    label: '__GLOBAL__',
+                    cml: this.globalProperties
+                });
+            } else {
+                const newSnippet = await createCMLSnippet({
+                    recordId: this.recordId,
+                    objectApiName: this.objectApiName,
+                    keyword: 'global',
+                    label: '__GLOBAL__'
+                });
+                this.globalSnippetId = newSnippet.Id;
+                await saveCMLSnippet({
+                    snippetId: this.globalSnippetId,
+                    label: '__GLOBAL__',
+                    cml: this.globalProperties
+                });
+            }
+            this.showToast('Success', 'Global properties saved', 'success');
+        } catch (error) {
+            this.showToast('Error', 'Error saving global properties: ' + error.body?.message, 'error');
+        }
     }
     
     handleLabelChange(event) {
@@ -556,12 +595,19 @@ export default class ConstraintStudio extends LightningElement {
             
             // Build annotation string
             const annotationParts = [`active=${this.isActive}`];
-            
-            // Add date annotations
+
+            // Add all annotations — auto-detect value types (matches Core PropertyMixin)
+            // Booleans and numbers: unquoted. Strings: quoted.
             this.annotations.forEach(ann => {
-                if (ann.type && ann.value) {
-                    const usDate = this.convertToUSDate(ann.value);
-                    annotationParts.push(`${ann.type}="${usDate}"`);
+                if (ann.type && (ann.value !== undefined && ann.value !== '')) {
+                    const val = ann.value;
+                    if (val === 'true' || val === 'false' || val === true || val === false) {
+                        annotationParts.push(`${ann.type}=${val}`);
+                    } else if (!isNaN(val) && val !== '') {
+                        annotationParts.push(`${ann.type}=${val}`);
+                    } else {
+                        annotationParts.push(`${ann.type}="${val}"`);
+                    }
                 }
             });
             
@@ -604,18 +650,18 @@ export default class ConstraintStudio extends LightningElement {
     
     handleAnnotationTypeChange(event) {
         const annotationId = event.currentTarget.dataset.id;
-        const newType = event.detail.value;
-        
-        this.annotations = this.annotations.map(ann => 
+        const newType = event.target.value;
+
+        this.annotations = this.annotations.map(ann =>
             ann.id === annotationId ? { ...ann, type: newType } : ann
         );
     }
     
     handleAnnotationValueChange(event) {
         const annotationId = event.currentTarget.dataset.id;
-        const newValue = event.detail.value;
-        
-        this.annotations = this.annotations.map(ann => 
+        const newValue = event.target.value;
+
+        this.annotations = this.annotations.map(ann =>
             ann.id === annotationId ? { ...ann, value: newValue } : ann
         );
     }
